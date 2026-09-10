@@ -1,143 +1,253 @@
 import streamlit as st
 import requests
+import re
 
 st.set_page_config(
-    page_title="StatsHub Quant Engine",
+    page_title="StatsHub Data Discovery",
     page_icon="⚽",
     layout="wide"
 )
 
-st.title("⚽ StatsHub Quant Engine")
-
-st.write(
-    "StatsHub maç verilerini otomatik olarak çekmek "
-    "ve daha sonra Quant analizine aktarmak için test sistemi."
-)
-
-st.divider()
-
-st.subheader("📊 StatsHub Maç Verisi")
+st.title("⚽ StatsHub Data Discovery")
 
 url = st.text_input(
-    "StatsHub maç URL'sini gir:",
-    placeholder="https://www.statshub.com/fixture/..."
+    "StatsHub maç URL'si:",
+    value="https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
 )
 
-if st.button("🔍 STATSHUB'A BAĞLAN", type="primary"):
+if st.button("🔎 VERİ YAPISINI ANALİZ ET", type="primary"):
 
     if not url:
-        st.warning("Lütfen bir StatsHub maç URL'si gir.")
+        st.error("URL gir.")
+        st.stop()
 
-    elif "statshub.com/fixture/" not in url:
-        st.error("Bu bir StatsHub maç URL'si gibi görünmüyor.")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Linux; Android 16; Mobile) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/140.0 Mobile Safari/537.36"
+        )
+    }
 
-    else:
+    try:
 
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Linux; Android 16; Mobile) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/140.0 Mobile Safari/537.36"
+        with st.spinner("StatsHub verisi inceleniyor..."):
+
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=30
             )
+
+        html = response.text
+
+        st.success("✅ StatsHub sayfası alındı.")
+
+        # ------------------------------------------------
+        # 1. TEMEL BİLGİLER
+        # ------------------------------------------------
+
+        st.subheader("📊 Temel Bilgiler")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric("HTTP", response.status_code)
+
+        with col2:
+            st.metric("HTML", f"{len(html):,} karakter")
+
+        with col3:
+            st.metric(
+                "Script Sayısı",
+                len(re.findall(r"<script", html, re.I))
+            )
+
+        # ------------------------------------------------
+        # 2. ÖNEMLİ VERİ YAPILARI
+        # ------------------------------------------------
+
+        st.subheader("🧬 Veri Yapısı Kontrolü")
+
+        checks = {
+            "__NEXT_DATA__": "__NEXT_DATA__",
+            "JSON-LD": 'application/ld+json',
+            "API ifadeleri": "/api/",
+            "GraphQL": "graphql",
+            "Player": "player",
+            "Team": "team",
+            "Lineup": "lineup",
+            "Stats": "stats",
+            "Fixture ID": "416477"
         }
 
-        try:
+        for name, search_text in checks.items():
 
-            with st.spinner("StatsHub'a bağlanılıyor..."):
+            if search_text.lower() in html.lower():
+                st.success(f"✅ {name} bulundu")
+            else:
+                st.warning(f"⚠️ {name} bulunamadı")
 
-                response = requests.get(
-                    url,
-                    headers=headers,
-                    timeout=30
-                )
+        # ------------------------------------------------
+        # 3. SCRIPT BLOKLARI
+        # ------------------------------------------------
 
-            st.success("✅ StatsHub sunucusuna bağlantı kuruldu.")
+        st.subheader("📦 Script Veri Blokları")
 
-            st.divider()
+        scripts = re.findall(
+            r"<script[^>]*>(.*?)</script>",
+            html,
+            re.I | re.S
+        )
 
-            st.subheader("🔎 Bağlantı Sonucu")
+        st.write(
+            f"Toplam script bloğu: **{len(scripts)}**"
+        )
 
-            col1, col2, col3 = st.columns(3)
+        for i, script in enumerate(scripts):
 
-            with col1:
-                st.metric(
-                    "HTTP Status",
-                    response.status_code
-                )
+            script_clean = script.strip()
 
-            with col2:
-                st.metric(
-                    "Veri Boyutu",
-                    f"{len(response.text):,} karakter"
-                )
+            if len(script_clean) > 100:
 
-            with col3:
-                st.metric(
-                    "Content-Type",
-                    response.headers.get(
-                        "content-type",
-                        "Bilinmiyor"
+                with st.expander(
+                    f"Script #{i+1} — {len(script_clean):,} karakter"
+                ):
+
+                    st.code(
+                        script_clean[:5000],
+                        language="javascript"
                     )
+
+        # ------------------------------------------------
+        # 4. API URL'LERİ
+        # ------------------------------------------------
+
+        st.subheader("🌐 Bulunan API / Veri URL'leri")
+
+        api_urls = sorted(
+            set(
+                re.findall(
+                    r'https?://[^"\']+',
+                    html
                 )
+            )
+        )
 
-            st.divider()
+        if api_urls:
 
-            html = response.text.lower()
+            for api in api_urls[:100]:
+                st.code(api)
 
-            st.subheader("📋 StatsHub Bölüm Kontrolü")
+        else:
 
-            sections = {
-                "Player Stats": "player stats",
-                "Team Stats": "team stats",
-                "Lineups": "lineups",
-                "Trends": "trends",
-                "Charts": "charts",
-                "Opponent Stats": "opponent stats",
-                "Match Ups": "match ups"
-            }
-
-            for name, keyword in sections.items():
-
-                if keyword in html:
-                    st.success(f"✅ {name} bulundu")
-                else:
-                    st.warning(f"⚠️ {name} HTML içinde bulunamadı")
-
-            st.divider()
-
-            st.subheader("🌐 Sayfa Başlığı")
-
-            st.write(
-                response.url
+            st.info(
+                "HTML içinde açık HTTP URL bulunamadı."
             )
 
-            st.divider()
+        # ------------------------------------------------
+        # 5. JSON BENZERİ BLOKLAR
+        # ------------------------------------------------
 
-            st.subheader("🧪 Ham Veri Testi")
+        st.subheader("🧩 JSON Benzeri Veri")
+
+        json_patterns = [
+            r'\{[^{}]{50,}\}',
+            r'\[[^\[\]]{50,}\]'
+        ]
+
+        found = []
+
+        for pattern in json_patterns:
+
+            matches = re.findall(
+                pattern,
+                html,
+                re.S
+            )
+
+            found.extend(matches)
+
+        found = sorted(
+            set(found),
+            key=len,
+            reverse=True
+        )
+
+        st.write(
+            f"Bulunan aday veri blokları: **{len(found)}**"
+        )
+
+        for i, block in enumerate(found[:20]):
 
             with st.expander(
-                "StatsHub'dan gelen ilk 3000 karakteri göster"
+                f"Aday veri #{i+1} — {len(block):,} karakter"
             ):
+
                 st.code(
-                    response.text[:3000],
-                    language="html"
+                    block[:5000]
                 )
 
-        except requests.exceptions.Timeout:
+        # ------------------------------------------------
+        # 6. PLAYER / TEAM ÇEVRESİ
+        # ------------------------------------------------
 
-            st.error(
-                "❌ StatsHub bağlantısı zaman aşımına uğradı."
-            )
+        st.subheader("👤 Player / Team Veri Bölgeleri")
 
-        except requests.exceptions.RequestException as e:
+        keywords = [
+            "player",
+            "team",
+            "lineup",
+            "shots",
+            "goals",
+            "assists",
+            "passes",
+            "corners",
+            "xg",
+            "possession"
+        ]
 
-            st.error(
-                f"❌ Bağlantı hatası: {e}"
-            )
+        for keyword in keywords:
 
-        except Exception as e:
+            positions = [
+                m.start()
+                for m in re.finditer(
+                    keyword,
+                    html,
+                    re.I
+                )
+            ]
 
-            st.error(
-                f"❌ Beklenmeyen hata: {e}"
-            )
+            if positions:
+
+                st.write(
+                    f"**{keyword}** → "
+                    f"{len(positions)} kez bulundu"
+                )
+
+                first_pos = positions[0]
+
+                with st.expander(
+                    f"{keyword} ilk veri bölgesi"
+                ):
+
+                    start = max(
+                        0,
+                        first_pos - 1000
+                    )
+
+                    end = min(
+                        len(html),
+                        first_pos + 3000
+                    )
+
+                    st.code(
+                        html[start:end]
+                    )
+
+    except Exception as e:
+
+        st.error(
+            f"❌ Hata: {e}"
+        )
