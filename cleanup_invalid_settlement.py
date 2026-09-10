@@ -13,8 +13,9 @@ FIXTURE_ID = "416477"
 EXPECTED_HOME_TEAM = "PSV"
 EXPECTED_AWAY_TEAM = "Shakhtar"
 
-EXPECTED_HOME_SCORE = 0
-EXPECTED_AWAY_SCORE = 0
+# Önceki hatalı kayıt
+INVALID_PREDICTION_ID = 1
+INVALID_SETTLEMENT_ID = 1
 
 
 # =========================================================
@@ -33,7 +34,7 @@ def main():
 
     print("")
     print("==========================================")
-    print("INVALID SETTLEMENT CLEANUP")
+    print("SAFE INVALID SETTLEMENT CLEANUP")
     print("==========================================")
     print("")
 
@@ -46,7 +47,7 @@ def main():
     cursor = conn.cursor()
 
     # -----------------------------------------------------
-    # FIND EXACT MATCH
+    # 1. EXACT MATCH
     # -----------------------------------------------------
 
     cursor.execute(
@@ -77,19 +78,8 @@ def main():
             "Target fixture bulunamadı."
         )
 
-    print("Fixture:", match["statshub_fixture_id"])
-    print("Home:", match["home_team"])
-    print("Away:", match["away_team"])
-    print("Status:", match["status"])
-    print(
-        "Final score:",
-        match["final_home_score"],
-        "-",
-        match["final_away_score"]
-    )
-
     # -----------------------------------------------------
-    # TEAM SAFETY
+    # 2. TEAM SAFETY
     # -----------------------------------------------------
 
     if (
@@ -104,160 +94,394 @@ def main():
 
         raise SystemExit(
             "CLEANUP SECURITY ERROR: "
-            "Takımlar hedef fixture ile eşleşmiyor."
+            "Takımlar eşleşmiyor."
         )
 
     match_id = match["id"]
 
+    print(
+        "Fixture:",
+        match["statshub_fixture_id"]
+    )
+
+    print(
+        "Match:",
+        match["home_team"],
+        "vs",
+        match["away_team"]
+    )
+
+    print(
+        "Match ID:",
+        match_id
+    )
+
+    print(
+        "Current status:",
+        match["status"]
+    )
+
+    print(
+        "Current score:",
+        match["final_home_score"],
+        "-",
+        match["final_away_score"]
+    )
+
     # -----------------------------------------------------
-    # FIND SETTLEMENTS
+    # 3. VERIFY PREDICTION
     # -----------------------------------------------------
 
     cursor.execute(
         """
         SELECT
-            s.id,
-            s.prediction_id,
-            s.final_home_score,
-            s.final_away_score,
-            s.result_1x2,
-            s.total_goals,
-            s.settled
-        FROM settlements s
-        JOIN predictions p
-          ON p.id = s.prediction_id
-        WHERE p.match_id = ?
-        ORDER BY s.id ASC
+            id,
+            match_id,
+            model_version,
+            model_locked
+        FROM predictions
+        WHERE id = ?
+          AND match_id = ?
+        LIMIT 1
         """,
-        (match_id,),
+        (
+            INVALID_PREDICTION_ID,
+            match_id,
+        ),
     )
 
-    settlements = cursor.fetchall()
+    prediction = cursor.fetchone()
+
+    if prediction is None:
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP ERROR: "
+            "Beklenen Prediction ID bulunamadı."
+        )
 
     print("")
     print(
-        "Settlement count:",
-        len(settlements)
+        "Prediction ID:",
+        prediction["id"]
     )
 
-    if not settlements:
+    print(
+        "Model:",
+        prediction["model_version"]
+    )
+
+    print(
+        "Model locked:",
+        prediction["model_locked"]
+    )
+
+    # -----------------------------------------------------
+    # 4. MODEL LOCK SAFETY
+    # -----------------------------------------------------
+
+    if int(
+        prediction["model_locked"]
+    ) != 1:
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP SECURITY ERROR: "
+            "Prediction model_locked=1 değil."
+        )
+
+    # -----------------------------------------------------
+    # 5. VERIFY EXACT SETTLEMENT
+    # -----------------------------------------------------
+
+    cursor.execute(
+        """
+        SELECT
+            id,
+            prediction_id,
+            final_home_score,
+            final_away_score,
+            result_1x2,
+            total_goals,
+            settled
+        FROM settlements
+        WHERE id = ?
+          AND prediction_id = ?
+        LIMIT 1
+        """,
+        (
+            INVALID_SETTLEMENT_ID,
+            INVALID_PREDICTION_ID,
+        ),
+    )
+
+    settlement = cursor.fetchone()
+
+    if settlement is None:
 
         print("")
         print(
-            "TEMİZLENECEK SETTLEMENT YOK."
+            "Temizlenecek eski settlement bulunamadı."
         )
-        print("")
 
         conn.close()
 
         return
 
-    # -----------------------------------------------------
-    # DELETE ONLY INVALID 0-0 SETTLEMENT
-    # -----------------------------------------------------
-
-    deleted_count = 0
-
-    for settlement in settlements:
-
-        settlement_id = settlement["id"]
-
-        home_score = settlement[
-            "final_home_score"
-        ]
-
-        away_score = settlement[
-            "final_away_score"
-        ]
-
-        print("")
-        print(
-            "Settlement ID:",
-            settlement_id
-        )
-
-        print(
-            "Prediction ID:",
-            settlement["prediction_id"]
-        )
-
-        print(
-            "Recorded score:",
-            home_score,
-            "-",
-            away_score
-        )
-
-        # -------------------------------------------------
-        # SAFETY:
-        # ONLY DELETE THE KNOWN INVALID 0-0 RECORD
-        # -------------------------------------------------
-
-        if (
-            home_score == EXPECTED_HOME_SCORE
-            and
-            away_score == EXPECTED_AWAY_SCORE
-        ):
-
-            cursor.execute(
-                """
-                DELETE FROM settlements
-                WHERE id = ?
-                """,
-                (settlement_id,),
-            )
-
-            deleted_count += 1
-
-            print(
-                "INVALID 0-0 SETTLEMENT DELETED."
-            )
-
-        else:
-
-            print(
-                "Settlement skor 0-0 değil."
-            )
-
-            print(
-                "SKIP — kayıt korunuyor."
-            )
-
-    # -----------------------------------------------------
-    # IMPORTANT:
-    # DO NOT DELETE PREDICTION
-    # -----------------------------------------------------
-
     print("")
     print(
-        "Prediction kayıtları silinmedi."
+        "Settlement ID:",
+        settlement["id"]
+    )
+
+    print(
+        "Settlement Prediction ID:",
+        settlement["prediction_id"]
+    )
+
+    print(
+        "Recorded score:",
+        settlement["final_home_score"],
+        "-",
+        settlement["final_away_score"]
     )
 
     # -----------------------------------------------------
-    # COMMIT
+    # 6. EXTRA SAFETY
+    # -----------------------------------------------------
+    #
+    # Sadece önceki hatalı 0-0 kaydı kabul edilir.
+    #
+
+    if (
+        settlement["final_home_score"] != 0
+        or
+        settlement["final_away_score"] != 0
+    ):
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP SECURITY ERROR: "
+            "Settlement skoru beklenen eski 0-0 "
+            "kaydına uymuyor."
+        )
+
+    # -----------------------------------------------------
+    # 7. DELETE EXACT SETTLEMENT ONLY
+    # -----------------------------------------------------
+
+    cursor.execute(
+        """
+        DELETE FROM settlements
+        WHERE id = ?
+          AND prediction_id = ?
+        """,
+        (
+            INVALID_SETTLEMENT_ID,
+            INVALID_PREDICTION_ID,
+        ),
+    )
+
+    deleted_count = cursor.rowcount
+
+    if deleted_count != 1:
+
+        conn.rollback()
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP ERROR: "
+            "Settlement silinemedi."
+        )
+
+    print("")
+    print(
+        "Eski hatalı settlement silindi."
+    )
+
+    # -----------------------------------------------------
+    # 8. RESET MATCH RESULT
+    # -----------------------------------------------------
+    #
+    # Maç gerçekte bitmediği için önceki yanlış
+    # settlement'ın matches tablosuna yazdığı sonucu
+    # temizliyoruz.
+    #
+
+    cursor.execute(
+        """
+        UPDATE matches
+        SET
+            status = ?,
+            final_home_score = NULL,
+            final_away_score = NULL,
+            updated_at = ?
+        WHERE id = ?
+          AND statshub_fixture_id = ?
+        """,
+        (
+            "notstarted",
+            now_utc(),
+            match_id,
+            FIXTURE_ID,
+        ),
+    )
+
+    if cursor.rowcount != 1:
+
+        conn.rollback()
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP ERROR: "
+            "Match status reset başarısız."
+        )
+
+    print(
+        "Match status: notstarted"
+    )
+
+    print(
+        "Final score: NULL - NULL"
+    )
+
+    # -----------------------------------------------------
+    # 9. COMMIT
     # -----------------------------------------------------
 
     conn.commit()
 
     # -----------------------------------------------------
-    # VERIFY
+    # 10. VERIFY SETTLEMENT DELETED
     # -----------------------------------------------------
 
     cursor.execute(
         """
         SELECT COUNT(*)
-        FROM settlements s
-        JOIN predictions p
-          ON p.id = s.prediction_id
-        WHERE p.match_id = ?
+        FROM settlements
+        WHERE id = ?
+          AND prediction_id = ?
         """,
-        (match_id,),
+        (
+            INVALID_SETTLEMENT_ID,
+            INVALID_PREDICTION_ID,
+        ),
     )
 
-    remaining_settlements = cursor.fetchone()[0]
+    settlement_exists = cursor.fetchone()[0]
+
+    if settlement_exists != 0:
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP VALIDATION ERROR: "
+            "Settlement hâlâ mevcut."
+        )
 
     # -----------------------------------------------------
-    # VERIFY PREDICTION STILL EXISTS
+    # 11. VERIFY PREDICTION PRESERVED
+    # -----------------------------------------------------
+
+    cursor.execute(
+        """
+        SELECT
+            id,
+            model_locked
+        FROM predictions
+        WHERE id = ?
+          AND match_id = ?
+        LIMIT 1
+        """,
+        (
+            INVALID_PREDICTION_ID,
+            match_id,
+        ),
+    )
+
+    verified_prediction = cursor.fetchone()
+
+    if verified_prediction is None:
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP VALIDATION ERROR: "
+            "Prediction silinmiş."
+        )
+
+    if int(
+        verified_prediction["model_locked"]
+    ) != 1:
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP VALIDATION ERROR: "
+            "Prediction model lock değişmiş."
+        )
+
+    # -----------------------------------------------------
+    # 12. VERIFY MATCH
+    # -----------------------------------------------------
+
+    cursor.execute(
+        """
+        SELECT
+            status,
+            final_home_score,
+            final_away_score
+        FROM matches
+        WHERE id = ?
+          AND statshub_fixture_id = ?
+        LIMIT 1
+        """,
+        (
+            match_id,
+            FIXTURE_ID,
+        ),
+    )
+
+    verified_match = cursor.fetchone()
+
+    if verified_match is None:
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP VALIDATION ERROR: "
+            "Match kaydı bulunamadı."
+        )
+
+    if verified_match["status"] != "notstarted":
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP VALIDATION ERROR: "
+            "Match status notstarted değil."
+        )
+
+    if (
+        verified_match["final_home_score"]
+        is not None
+        or
+        verified_match["final_away_score"]
+        is not None
+    ):
+
+        conn.close()
+
+        raise SystemExit(
+            "CLEANUP VALIDATION ERROR: "
+            "Final skor temizlenmemiş."
+        )
+
+    # -----------------------------------------------------
+    # 13. TOTAL COUNTS
     # -----------------------------------------------------
 
     cursor.execute(
@@ -271,69 +495,42 @@ def main():
 
     prediction_count = cursor.fetchone()[0]
 
-    # -----------------------------------------------------
-    # VERIFY MATCH STILL EXISTS
-    # -----------------------------------------------------
-
     cursor.execute(
         """
         SELECT COUNT(*)
-        FROM matches
-        WHERE id = ?
+        FROM settlements
+        WHERE prediction_id = ?
         """,
-        (match_id,),
+        (INVALID_PREDICTION_ID,),
     )
 
-    match_count = cursor.fetchone()[0]
+    settlement_count = cursor.fetchone()[0]
 
     conn.close()
 
     # -----------------------------------------------------
-    # FINAL VALIDATION
+    # 14. FINAL
     # -----------------------------------------------------
-
-    if match_count != 1:
-
-        raise SystemExit(
-            "CLEANUP VALIDATION ERROR: "
-            "Match kaydı değişmiş."
-        )
-
-    if prediction_count < 1:
-
-        raise SystemExit(
-            "CLEANUP VALIDATION ERROR: "
-            "Prediction kaydı bulunamadı."
-        )
 
     print("")
     print("==========================================")
     print("CLEANUP VALIDATION: PASS")
     print("==========================================")
     print("")
+
     print(
-        "Deleted settlements:",
+        "Deleted settlement:",
         deleted_count
     )
 
     print(
-        "Remaining settlements:",
-        remaining_settlements
+        "Remaining settlement for Prediction 1:",
+        settlement_count
     )
 
     print(
-        "Predictions preserved:",
+        "Prediction preserved:",
         prediction_count
-    )
-
-    print(
-        "Match preserved:",
-        match_count
-    )
-
-    print("")
-    print(
-        "Prediction probabilities: PRESERVED"
     )
 
     print(
@@ -341,9 +538,17 @@ def main():
     )
 
     print(
-        "Database cleanup: COMPLETE"
+        "Match status: notstarted"
     )
 
+    print(
+        "Final score: NULL - NULL"
+    )
+
+    print("")
+    print(
+        "SAFE CLEANUP COMPLETE"
+    )
     print("")
 
 
