@@ -470,7 +470,16 @@ jobs:
 
 
       # =========================================================
-      # 12. VERIFY PREDICTION DATABASE
+      # 12. SETTLEMENT ENGINE
+      # =========================================================
+
+      - name: Run StatsHub settlement engine
+        run: |
+          python settle_prediction.py
+
+
+      # =========================================================
+      # 13. VERIFY PREDICTION DATABASE
       # =========================================================
 
       - name: Verify prediction database
@@ -492,7 +501,7 @@ jobs:
           cursor = conn.cursor()
 
           # -----------------------------------------------------
-          # COUNT
+          # PREDICTION COUNT
           # -----------------------------------------------------
 
           cursor.execute("""
@@ -500,9 +509,9 @@ jobs:
               FROM predictions
           """)
 
-          count = cursor.fetchone()[0]
+          prediction_count = cursor.fetchone()[0]
 
-          if count < 1:
+          if prediction_count < 1:
               raise SystemExit(
                   "PREDICTION ERROR: "
                   "Prediction kaydı bulunamadı."
@@ -528,35 +537,117 @@ jobs:
               LIMIT 1
           """)
 
-          row = cursor.fetchone()
+          prediction = cursor.fetchone()
 
-          if row is None:
+          if prediction is None:
               raise SystemExit(
                   "PREDICTION ERROR: "
                   "Son prediction bulunamadı."
               )
 
-          if int(row["model_locked"]) != 1:
+          if int(prediction["model_locked"]) != 1:
               raise SystemExit(
                   "PREDICTION ERROR: "
                   "Model LOCKED değil."
               )
+
+          # -----------------------------------------------------
+          # SETTLEMENT COUNT
+          # -----------------------------------------------------
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM settlements
+          """)
+
+          settlement_count = cursor.fetchone()[0]
+
+          # -----------------------------------------------------
+          # LATEST MATCH
+          # -----------------------------------------------------
+
+          cursor.execute("""
+              SELECT
+                  id,
+                  statshub_fixture_id,
+                  home_team,
+                  away_team,
+                  status,
+                  final_home_score,
+                  final_away_score
+              FROM matches
+              WHERE statshub_fixture_id = ?
+              LIMIT 1
+          """, ("416477",))
+
+          match = cursor.fetchone()
 
           print("")
           print("==========================================")
           print("PREDICTION DATABASE VALIDATION: PASS")
           print("==========================================")
           print("")
-          print("Prediction ID:", row["id"])
-          print("Match ID:", row["match_id"])
-          print("Model:", row["model_version"])
-          print("Model Locked:", row["model_locked"])
-          print("Home Win:", row["home_win_probability"])
-          print("Draw:", row["draw_probability"])
-          print("Away Win:", row["away_win_probability"])
-          print("Home Lambda:", row["home_lambda"])
-          print("Away Lambda:", row["away_lambda"])
-          print("Total Predictions:", count)
+          print(
+              "Prediction ID:",
+              prediction["id"]
+          )
+          print(
+              "Match ID:",
+              prediction["match_id"]
+          )
+          print(
+              "Model:",
+              prediction["model_version"]
+          )
+          print(
+              "Model Locked:",
+              prediction["model_locked"]
+          )
+          print(
+              "Home Win:",
+              prediction["home_win_probability"]
+          )
+          print(
+              "Draw:",
+              prediction["draw_probability"]
+          )
+          print(
+              "Away Win:",
+              prediction["away_win_probability"]
+          )
+          print(
+              "Home Lambda:",
+              prediction["home_lambda"]
+          )
+          print(
+              "Away Lambda:",
+              prediction["away_lambda"]
+          )
+          print(
+              "Total Predictions:",
+              prediction_count
+          )
+          print(
+              "Total Settlements:",
+              settlement_count
+          )
+
+          if match is not None:
+
+              print("")
+              print("Fixture:", match["statshub_fixture_id"])
+              print("Home:", match["home_team"])
+              print("Away:", match["away_team"])
+              print("Status:", match["status"])
+              print(
+                  "Final Home Score:",
+                  match["final_home_score"]
+              )
+              print(
+                  "Final Away Score:",
+                  match["final_away_score"]
+              )
+
           print("")
 
           conn.close()
@@ -564,7 +655,7 @@ jobs:
 
 
       # =========================================================
-      # 13. VERIFY OUTPUT FILES
+      # 14. VERIFY OUTPUT FILES
       # =========================================================
 
       - name: Verify output files
@@ -590,7 +681,7 @@ jobs:
 
 
       # =========================================================
-      # 14. UPLOAD ARTIFACT
+      # 15. UPLOAD ARTIFACT
       #
       # SADECE 1 KEZ
       # =========================================================
@@ -605,7 +696,7 @@ jobs:
 
 
       # =========================================================
-      # 15. PERSIST DATABASE
+      # 16. PERSIST DATABASE
       # =========================================================
 
       - name: Persist database
@@ -632,7 +723,7 @@ jobs:
 
 
       # =========================================================
-      # 16. FINAL
+      # 17. FINAL
       # =========================================================
 
       - name: Final validation
@@ -648,6 +739,7 @@ jobs:
           echo "Poisson model           : PASS"
           echo "Model validation        : PASS"
           echo "Prediction recording    : PASS"
+          echo "Settlement engine       : PASS"
           echo "Database validation     : PASS"
           echo "Artifact upload         : PASS"
           echo "Database persistence    : PASS"
