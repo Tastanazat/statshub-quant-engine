@@ -115,6 +115,1268 @@ jobs:
                   + ", ".join(sorted(missing))
               )
 
+          print("")
+          print("==========================================")
+          print("DATABASE VALIDATION: PASS")
+          print("==========================================")
+          print("")
+          print(
+              "Tables:",
+              ", ".join(sorted(tables))
+          )
+          print("")
+
+          conn.close()
+          PY
+
+
+      # =========================================================
+      # 7. STATSHUB SCRAPER
+      # =========================================================
+
+      - name: Run StatsHub scraper
+        run: |
+          python scrape_statshub.py
+
+
+      # =========================================================
+      # 8. STATSHUB ANALYSIS
+      # =========================================================
+
+      - name: Run StatsHub analysis
+        run: |
+          python analyze_statshub.py
+
+
+      # =========================================================
+      # 9. BUILD MATCH MODEL
+      # =========================================================
+
+      - name: Build StatsHub match model
+        run: |
+          python build_match_model.py
+
+
+      # =========================================================
+      # 10. VERIFY MATCH MODEL
+      # =========================================================
+
+      - name: Verify match model
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import math
+
+          path = "data/statshub_match_model.json"
+
+          if not os.path.exists(path):
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "statshub_match_model.json bulunamadı."
+              )
+
+          with open(
+              path,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              model = json.load(f)
+
+          # -----------------------------------------------------
+          # SOURCE
+          # -----------------------------------------------------
+
+          if model.get("source") != "StatsHub":
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "Model kaynağı StatsHub değil."
+              )
+
+          # -----------------------------------------------------
+          # MODEL VERSION
+          # -----------------------------------------------------
+
+          model_version = model.get(
+              "model_version"
+          )
+
+          if not model_version:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "model_version bulunamadı."
+              )
+
+          # -----------------------------------------------------
+          # FIXTURE
+          # -----------------------------------------------------
+
+          fixture = model.get(
+              "fixture",
+              {}
+          )
+
+          home = fixture.get("home")
+          away = fixture.get("away")
+
+          if not home or not away:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "Fixture bilgisi eksik."
+              )
+
+          # -----------------------------------------------------
+          # LAMBDA
+          # -----------------------------------------------------
+
+          lambdas = model.get(
+              "lambda",
+              {}
+          )
+
+          lambda_home = lambdas.get("home")
+          lambda_away = lambdas.get("away")
+
+          if lambda_home is None:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "lambda.home yok."
+              )
+
+          if lambda_away is None:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "lambda.away yok."
+              )
+
+          if not math.isfinite(
+              float(lambda_home)
+          ):
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "lambda.home geçersiz."
+              )
+
+          if not math.isfinite(
+              float(lambda_away)
+          ):
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "lambda.away geçersiz."
+              )
+
+          if float(lambda_home) <= 0:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "lambda.home <= 0."
+              )
+
+          if float(lambda_away) <= 0:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "lambda.away <= 0."
+              )
+
+          # -----------------------------------------------------
+          # PROBABILITIES
+          # -----------------------------------------------------
+
+          probabilities = model.get(
+              "probabilities",
+              {}
+          )
+
+          required = [
+              "home_win",
+              "draw",
+              "away_win",
+              "over_0_5",
+              "under_0_5",
+              "over_1_5",
+              "under_1_5",
+              "over_2_5",
+              "under_2_5",
+              "over_3_5",
+              "under_3_5",
+              "over_4_5",
+              "under_4_5",
+              "btts_yes",
+              "btts_no"
+          ]
+
+          missing = [
+              key
+              for key in required
+              if key not in probabilities
+          ]
+
+          if missing:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "Eksik probability: "
+                  + ", ".join(missing)
+              )
+
+          # -----------------------------------------------------
+          # RANGE
+          # -----------------------------------------------------
+
+          for key in required:
+
+              value = float(
+                  probabilities[key]
+              )
+
+              if not math.isfinite(value):
+                  raise SystemExit(
+                      f"MATCH MODEL ERROR: "
+                      f"{key} geçersiz."
+                  )
+
+              if value < 0 or value > 1:
+                  raise SystemExit(
+                      f"MATCH MODEL ERROR: "
+                      f"{key} 0-1 dışında."
+                  )
+
+          # -----------------------------------------------------
+          # 1X2
+          # -----------------------------------------------------
+
+          one_x_two = (
+              float(probabilities["home_win"])
+              + float(probabilities["draw"])
+              + float(probabilities["away_win"])
+          )
+
+          if abs(
+              one_x_two - 1.0
+          ) > 1e-6:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "1X2 toplamı 1 değil."
+              )
+
+          # -----------------------------------------------------
+          # OVER / UNDER
+          # -----------------------------------------------------
+
+          for line in [
+              "0_5",
+              "1_5",
+              "2_5",
+              "3_5",
+              "4_5"
+          ]:
+
+              over = float(
+                  probabilities[
+                      f"over_{line}"
+                  ]
+              )
+
+              under = float(
+                  probabilities[
+                      f"under_{line}"
+                  ]
+              )
+
+              if abs(
+                  (over + under) - 1.0
+              ) > 1e-6:
+                  raise SystemExit(
+                      f"MATCH MODEL ERROR: "
+                      f"O/U {line} toplamı 1 değil."
+                  )
+
+          # -----------------------------------------------------
+          # BTTS
+          # -----------------------------------------------------
+
+          btts = (
+              float(probabilities["btts_yes"])
+              + float(probabilities["btts_no"])
+          )
+
+          if abs(
+              btts - 1.0
+          ) > 1e-6:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "BTTS toplamı 1 değil."
+              )
+
+          # -----------------------------------------------------
+          # INTERNAL VALIDATION
+          # -----------------------------------------------------
+
+          validation = model.get(
+              "validation",
+              {}
+          )
+
+          if validation.get(
+              "validation_passed",
+              False
+          ) is not True:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "Matematiksel validation PASS değil."
+              )
+
+          # -----------------------------------------------------
+          # SUCCESS
+          # -----------------------------------------------------
+
+          print("")
+          print("==========================================")
+          print("MATCH MODEL VALIDATION: PASS")
+          print("==========================================")
+          print("")
+
+          print(
+              "Source:",
+              model["source"]
+          )
+
+          print(
+              "Model:",
+              model_version
+          )
+
+          print(
+              "Home:",
+              home
+          )
+
+          print(
+              "Away:",
+              away
+          )
+
+          print(
+              "Home Lambda:",
+              lambda_home
+          )
+
+          print(
+              "Away Lambda:",
+              lambda_away
+          )
+
+          print(
+              "Home Win:",
+              probabilities["home_win"]
+          )
+
+          print(
+              "Draw:",
+              probabilities["draw"]
+          )
+
+          print(
+              "Away Win:",
+              probabilities["away_win"]
+          )
+
+          print(
+              "Over 2.5:",
+              probabilities["over_2_5"]
+          )
+
+          print(
+              "Under 2.5:",
+              probabilities["under_2_5"]
+          )
+
+          print(
+              "BTTS Yes:",
+              probabilities["btts_yes"]
+          )
+
+          print(
+              "BTTS No:",
+              probabilities["btts_no"]
+          )
+
+          print("")
+          print(
+              "Mathematical Validation: PASS"
+          )
+          print("")
+
+          PY
+
+
+      # =========================================================
+      # 11. RECORD MODEL PREDICTION
+      # =========================================================
+
+      - name: Record model prediction
+        run: |
+          python record_prediction.py
+
+
+      # =========================================================
+      # 12. CLEANUP OLD INVALID SETTLEMENT
+      # =========================================================
+
+      - name: Cleanup old invalid settlement
+        run: |
+          python cleanup_invalid_settlement.py
+
+
+      # =========================================================
+      # 13. RUN STATSHUB SETTLEMENT ENGINE
+      # =========================================================
+
+      - name: Run StatsHub settlement engine
+        run: |
+          python settle_prediction.py
+
+
+      # =========================================================
+      # 14. CALCULATE MODEL PERFORMANCE
+      # =========================================================
+
+      - name: Calculate model performance
+        run: |
+          python calculate_model_performance.py
+
+
+      # =========================================================
+      # 15. RUN MODEL CALIBRATION
+      # =========================================================
+
+      - name: Run model calibration
+        run: |
+          python calibrate_model.py
+
+
+      # =========================================================
+      # 16. RUN MODEL REGISTRY
+      # =========================================================
+
+      - name: Run model registry
+        run: |
+          python model_registry.py
+
+
+      # =========================================================
+      # 17. VERIFY PREDICTION DATABASE
+      # =========================================================
+
+      - name: Verify prediction database
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import os
+
+          db = "data/database/quant_engine.db"
+
+          if not os.path.exists(db):
+              raise SystemExit(
+                  "PREDICTION DATABASE ERROR: "
+                  "Database bulunamadı."
+              )
+
+          conn = sqlite3.connect(db)
+          conn.row_factory = sqlite3.Row
+
+          cursor = conn.cursor()
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM predictions
+          """)
+
+          count = cursor.fetchone()[0]
+
+          if count < 1:
+              raise SystemExit(
+                  "PREDICTION ERROR: "
+                  "Prediction kaydı bulunamadı."
+              )
+
+          cursor.execute("""
+              SELECT
+                  id,
+                  match_id,
+                  model_version,
+                  model_locked,
+                  home_win_probability,
+                  draw_probability,
+                  away_win_probability,
+                  home_lambda,
+                  away_lambda
+              FROM predictions
+              ORDER BY id DESC
+              LIMIT 1
+          """)
+
+          row = cursor.fetchone()
+
+          if row is None:
+              raise SystemExit(
+                  "PREDICTION ERROR: "
+                  "Prediction bulunamadı."
+              )
+
+          if int(
+              row["model_locked"]
+          ) != 1:
+              raise SystemExit(
+                  "PREDICTION ERROR: "
+                  "Model LOCKED değil."
+              )
+
+          print("")
+          print("==========================================")
+          print("PREDICTION DATABASE VALIDATION: PASS")
+          print("==========================================")
+          print("")
+
+          print(
+              "Prediction ID:",
+              row["id"]
+          )
+
+          print(
+              "Match ID:",
+              row["match_id"]
+          )
+
+          print(
+              "Model:",
+              row["model_version"]
+          )
+
+          print(
+              "Model Locked:",
+              row["model_locked"]
+          )
+
+          print(
+              "Home Win:",
+              row["home_win_probability"]
+          )
+
+          print(
+              "Draw:",
+              row["draw_probability"]
+          )
+
+          print(
+              "Away Win:",
+              row["away_win_probability"]
+          )
+
+          print(
+              "Home Lambda:",
+              row["home_lambda"]
+          )
+
+          print(
+              "Away Lambda:",
+              row["away_lambda"]
+          )
+
+          print(
+              "Total Predictions:",
+              count
+          )
+
+          print("")
+
+          conn.close()
+          PY
+
+
+      # =========================================================
+      # 18. VERIFY SETTLEMENT DATABASE
+      # =========================================================
+
+      - name: Verify settlement database
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import os
+
+          db = "data/database/quant_engine.db"
+
+          if not os.path.exists(db):
+              raise SystemExit(
+                  "SETTLEMENT DATABASE ERROR: "
+                  "Database bulunamadı."
+              )
+
+          conn = sqlite3.connect(db)
+          conn.row_factory = sqlite3.Row
+
+          cursor = conn.cursor()
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM settlements
+          """)
+
+          settlement_count = (
+              cursor.fetchone()[0]
+          )
+
+          cursor.execute("""
+              SELECT
+                  statshub_fixture_id,
+                  home_team,
+                  away_team,
+                  status,
+                  final_home_score,
+                  final_away_score
+              FROM matches
+              WHERE statshub_fixture_id = ?
+              LIMIT 1
+          """, ("416477",))
+
+          match = cursor.fetchone()
+
+          if match is None:
+              raise SystemExit(
+                  "SETTLEMENT DATABASE ERROR: "
+                  "PSV-Shakhtar fixture bulunamadı."
+              )
+
+          print("")
+          print("==========================================")
+          print("SETTLEMENT DATABASE VALIDATION")
+          print("==========================================")
+          print("")
+
+          print(
+              "Fixture:",
+              match["statshub_fixture_id"]
+          )
+
+          print(
+              "Match:",
+              match["home_team"],
+              "vs",
+              match["away_team"]
+          )
+
+          print(
+              "Status:",
+              match["status"]
+          )
+
+          print(
+              "Final score:",
+              match["final_home_score"],
+              "-",
+              match["final_away_score"]
+          )
+
+          print(
+              "Total settlements:",
+              settlement_count
+          )
+
+          if match["status"] == "notstarted":
+
+              if (
+                  match["final_home_score"] is not None
+                  or
+                  match["final_away_score"] is not None
+              ):
+                  raise SystemExit(
+                      "SETTLEMENT DATABASE ERROR: "
+                      "notstarted maçta final skor var."
+                  )
+
+              print("")
+              print(
+                  "MATCH STATUS: NOT STARTED"
+              )
+
+              print(
+                  "Final result: NOT AVAILABLE"
+              )
+
+              print(
+                  "Settlement: NONE EXPECTED"
+              )
+
+          elif match["status"] in (
+              "finished",
+              "ended",
+              "completed"
+          ):
+
+              if (
+                  match["final_home_score"] is None
+                  or
+                  match["final_away_score"] is None
+              ):
+                  raise SystemExit(
+                      "SETTLEMENT DATABASE ERROR: "
+                      "Finished maçta final skor yok."
+                  )
+
+              print("")
+              print(
+                  "MATCH STATUS: FINISHED"
+              )
+
+              print(
+                  "Final result:",
+                  match["final_home_score"],
+                  "-",
+                  match["final_away_score"]
+              )
+
+          print("")
+          print(
+              "SETTLEMENT DATABASE VALIDATION: PASS"
+          )
+          print("")
+
+          conn.close()
+          PY
+
+
+      # =========================================================
+      # 19. VERIFY MODEL PERFORMANCE DATABASE
+      # =========================================================
+
+      - name: Verify model performance database
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import os
+
+          db = "data/database/quant_engine.db"
+
+          if not os.path.exists(db):
+              raise SystemExit(
+                  "PERFORMANCE DATABASE ERROR: "
+                  "Database bulunamadı."
+              )
+
+          conn = sqlite3.connect(db)
+          conn.row_factory = sqlite3.Row
+
+          cursor = conn.cursor()
+
+          cursor.execute("""
+              SELECT name
+              FROM sqlite_master
+              WHERE type='table'
+              AND name='model_performance'
+          """)
+
+          if cursor.fetchone() is None:
+              raise SystemExit(
+                  "PERFORMANCE DATABASE ERROR: "
+                  "model_performance tablosu yok."
+              )
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM model_performance
+          """)
+
+          performance_count = (
+              cursor.fetchone()[0]
+          )
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM settlements
+              WHERE settled = 1
+          """)
+
+          settled_count = (
+              cursor.fetchone()[0]
+          )
+
+          print("")
+          print("==========================================")
+          print("MODEL PERFORMANCE DATABASE VALIDATION")
+          print("==========================================")
+          print("")
+
+          print(
+              "Settled predictions:",
+              settled_count
+          )
+
+          print(
+              "Performance records:",
+              performance_count
+          )
+
+          if settled_count == 0:
+
+              print("")
+              print(
+                  "No settled predictions yet."
+              )
+
+              print(
+                  "Performance records are expected to remain 0."
+              )
+
+          else:
+
+              if performance_count == 0:
+                  raise SystemExit(
+                      "PERFORMANCE DATABASE ERROR: "
+                      "Settlement var fakat performance kaydı yok."
+                  )
+
+              cursor.execute("""
+                  SELECT
+                      model_version,
+                      market,
+                      sample_size,
+                      brier_score,
+                      log_loss,
+                      calibration_error
+                  FROM model_performance
+                  ORDER BY id DESC
+                  LIMIT 10
+              """)
+
+              rows = cursor.fetchall()
+
+              print("")
+              print(
+                  "Latest performance records:"
+              )
+
+              for row in rows:
+
+                  print(
+                      f"{row['model_version']} | "
+                      f"{row['market']} | "
+                      f"n={row['sample_size']} | "
+                      f"Brier={row['brier_score']:.6f} | "
+                      f"LogLoss={row['log_loss']:.6f} | "
+                      f"CalError={row['calibration_error']:.6f}"
+                  )
+
+          print("")
+          print(
+              "MODEL PERFORMANCE DATABASE VALIDATION: PASS"
+          )
+          print("")
+
+          conn.close()
+          PY
+
+
+      # =========================================================
+      # 20. VERIFY CALIBRATION DATABASE
+      # =========================================================
+
+      - name: Verify calibration database
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import os
+
+          db = "data/database/quant_engine.db"
+
+          if not os.path.exists(db):
+              raise SystemExit(
+                  "CALIBRATION DATABASE ERROR: "
+                  "Database bulunamadı."
+              )
+
+          conn = sqlite3.connect(db)
+          conn.row_factory = sqlite3.Row
+
+          cursor = conn.cursor()
+
+          cursor.execute("""
+              SELECT name
+              FROM sqlite_master
+              WHERE type='table'
+              AND name='calibration_history'
+          """)
+
+          if cursor.fetchone() is None:
+              raise SystemExit(
+                  "CALIBRATION DATABASE ERROR: "
+                  "calibration_history tablosu yok."
+              )
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM calibration_history
+          """)
+
+          calibration_count = (
+              cursor.fetchone()[0]
+          )
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM settlements
+              WHERE settled = 1
+          """)
+
+          settled_count = (
+              cursor.fetchone()[0]
+          )
+
+          print("")
+          print("==========================================")
+          print("CALIBRATION DATABASE VALIDATION")
+          print("==========================================")
+          print("")
+
+          print(
+              "Settled predictions:",
+              settled_count
+          )
+
+          print(
+              "Calibration history records:",
+              calibration_count
+          )
+
+          if settled_count == 0:
+
+              print("")
+              print(
+                  "No settled predictions yet."
+              )
+
+              print(
+                  "Calibration Engine is waiting."
+              )
+
+              print(
+                  "No calibration is applied."
+              )
+
+          else:
+
+              if calibration_count == 0:
+                  raise SystemExit(
+                      "CALIBRATION DATABASE ERROR: "
+                      "Settlement var fakat calibration history yok."
+                  )
+
+              print("")
+              print(
+                  "Settled data available."
+              )
+
+          print("")
+          print(
+              "CALIBRATION DATABASE VALIDATION: PASS"
+          )
+          print("")
+
+          conn.close()
+          PY
+
+
+      # =========================================================
+      # 21. VERIFY MODEL REGISTRY
+      # =========================================================
+
+      - name: Verify model registry
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          registry_file = (
+              "data/models/model_registry.json"
+          )
+
+          model_file = (
+              "data/statshub_match_model.json"
+          )
+
+          if not os.path.exists(
+              registry_file
+          ):
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "model_registry.json bulunamadı."
+              )
+
+          if not os.path.exists(
+              model_file
+          ):
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "statshub_match_model.json bulunamadı."
+              )
+
+          with open(
+              registry_file,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              registry = json.load(f)
+
+          with open(
+              model_file,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              model = json.load(f)
+
+          if registry.get(
+              "source"
+          ) != "StatsHub":
+
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "Registry source StatsHub değil."
+              )
+
+          registry_version = registry.get(
+              "registry_version"
+          )
+
+          if not registry_version:
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "registry_version yok."
+              )
+
+          active_model = registry.get(
+              "active_model"
+          )
+
+          if not active_model:
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "active_model boş."
+              )
+
+          current_model = model.get(
+              "model_version"
+          )
+
+          if not current_model:
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "Current model version yok."
+              )
+
+          models = registry.get(
+              "models",
+              {}
+          )
+
+          if not models:
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "Registry içinde model yok."
+              )
+
+          if current_model not in models:
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "Current model registry'de yok."
+              )
+
+          registered_model = models[
+              current_model
+          ]
+
+          if registered_model.get(
+              "source"
+          ) != "StatsHub":
+
+              raise SystemExit(
+                  "MODEL REGISTRY ERROR: "
+                  "Registered model StatsHub değil."
+              )
+
+          print("")
+          print("==========================================")
+          print("MODEL REGISTRY VALIDATION: PASS")
+          print("==========================================")
+          print("")
+
+          print(
+              "Registry version:",
+              registry_version
+          )
+
+          print(
+              "Current model:",
+              current_model
+          )
+
+          print(
+              "Active model:",
+              active_model
+          )
+
+          print(
+              "Registered models:",
+              len(models)
+          )
+
+          print(
+              "Registry file:",
+              registry_file
+          )
+
+          print("")
+
+          if active_model == current_model:
+
+              print(
+                  "ACTIVE MODEL:",
+                  active_model
+              )
+
+          else:
+
+              print(
+                  "ACTIVE MODEL PRESERVED:",
+                  active_model
+              )
+
+              print(
+                  "Candidate model:",
+                  current_model
+              )
+
+          print("")
+          print(
+              "MODEL REGISTRY DATABASE VALIDATION: PASS"
+          )
+          print("")
+
+          PY
+
+
+      # =========================================================
+      # 22. VERIFY OUTPUT FILES
+      # =========================================================
+
+      - name: Verify output files
+        run: |
+          test -f data/statshub_team_stats.json
+          test -f data/statshub_team_analysis.json
+          test -f data/statshub_match_model.json
+          test -f data/database/quant_engine.db
+          test -f data/models/calibration.json
+          test -f data/models/model_registry.json
+
+          echo ""
+          echo "=========================================="
+          echo "OUTPUT FILE VALIDATION: PASS"
+          echo "=========================================="
+          echo ""
+
+          echo "StatsHub Team Stats      : OK"
+          echo "StatsHub Team Analysis   : OK"
+          echo "StatsHub Match Model     : OK"
+          echo "Quant Engine Database    : OK"
+          echo "Settlement Engine        : OK"
+          echo "Performance Engine       : OK"
+          echo "Calibration Engine       : OK"
+          echo "Model Registry           : OK"
+
+          echo ""
+          echo "Data files:"
+          find data -maxdepth 3 -type f | sort
+
+
+      # =========================================================
+      # 23. UPLOAD ARTIFACT
+      # =========================================================
+
+      - name: Upload StatsHub data
+        uses: actions/upload-artifact@v6
+        with:
+          name: statshub-scan-${{ github.run_id }}
+          path: data/
+          if-no-files-found: error
+          retention-days: 30
+
+
+      # =========================================================
+      # 24. PERSIST DATABASE + MODELS
+      # =========================================================
+
+      - name: Persist database and model files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/database/quant_engine.db
+          git add data/models/calibration.json
+          git add data/models/model_registry.json
+
+          if git diff --cached --quiet; then
+
+            echo "Database/model dosyalarında değişiklik yok."
+
+          else
+
+            git commit \
+              -m "Update Quant Engine database and models"
+
+            git push
+
+            echo "Database ve model dosyaları GitHub repository'ye kaydedildi."
+
+          fi
+
+
+      # =========================================================
+      # 25. FINAL VALIDATION
+      # =========================================================
+
+      - name: Final validation
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "STATSHUB QUANT ENGINE"
+          echo "WORKFLOW SUCCESS"
+          echo "=========================================="
+          echo ""
+
+          echo "StatsHub scraping       : PASS"
+          echo "StatsHub analysis       : PASS"
+          echo "Poisson model           : PASS"
+          echo "Model validation        : PASS"
+          echo "Prediction recording    : PASS"
+          echo "Invalid cleanup         : PASS"
+          echo "Settlement Engine       : PASS"
+          echo "Performance Engine      : PASS"
+          echo "Calibration Engine      : PASS"
+          echo "Model Registry          : PASS"
+          echo "Database validation     : PASS"
+          echo "Artifact upload         : PASS"
+          echo "Database persistence    : PASS"
+
+          echo ""
+          echo "=========================================="
+          echo "SYSTEM READY"
+          echo "=========================================="              "database_metadata"
+          }
+
+          missing = required_tables - tables
+
+          if missing:
+              raise SystemExit(
+                  "DATABASE ERROR: Eksik tablolar: "
+                  + ", ".join(sorted(missing))
+              )
+
           print("DATABASE VALIDATION: PASS")
           print(
               "Tables:",
