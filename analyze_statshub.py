@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 # ============================================================
 
 INPUT_FILE = "data/statshub_team_stats.json"
-
 OUTPUT_FILE = "data/statshub_team_analysis.json"
 
 TEAMS = {
@@ -21,7 +20,6 @@ TEAMS = {
 # ============================================================
 
 if not os.path.exists(INPUT_FILE):
-
     raise FileNotFoundError(
         f"Dosya bulunamadı: {INPUT_FILE}"
     )
@@ -31,7 +29,6 @@ with open(
     "r",
     encoding="utf-8"
 ) as f:
-
     source = json.load(f)
 
 
@@ -42,41 +39,52 @@ with open(
 def to_number(value):
 
     try:
-
         if value is None:
             return None
 
         return float(value)
 
     except Exception:
-
         return None
 
 
 # ============================================================
-# TAKIMIN MAÇLARINI ÇIKAR
+# SKORU INTEGER'A ÇEVİR
+# ============================================================
+
+def to_score(value):
+
+    try:
+        if value is None:
+            return None
+
+        return int(value)
+
+    except Exception:
+        return None
+
+
+# ============================================================
+# TAKIM MAÇLARINI ÇIKAR
 # ============================================================
 
 def extract_team_matches(
     team_name,
     team_id,
-    stat_data
+    stat_info
 ):
 
-    if not isinstance(stat_data, dict):
-
+    if not isinstance(stat_info, dict):
         return []
 
-    raw = stat_data.get("data")
+    raw = stat_info.get("data")
 
     if not isinstance(raw, dict):
-
         return []
 
     matches = raw.get("data")
 
     if not isinstance(matches, list):
-
         return []
 
     result = []
@@ -94,9 +102,9 @@ def extract_team_matches(
             "away_team_id"
         )
 
-        # ----------------------------------------------------
-        # Takımın hangi tarafta olduğunu belirle
-        # ----------------------------------------------------
+        # ====================================================
+        # EV SAHİBİ
+        # ====================================================
 
         if home_id == team_id:
 
@@ -112,13 +120,17 @@ def extract_team_matches(
 
             opponent_id = away_id
 
-            team_score = match.get(
-                "home_score"
+            team_score = to_score(
+                match.get("home_score")
             )
 
-            opponent_score = match.get(
-                "away_score"
+            opponent_score = to_score(
+                match.get("away_score")
             )
+
+        # ====================================================
+        # DEPLASMAN
+        # ====================================================
 
         elif away_id == team_id:
 
@@ -134,45 +146,41 @@ def extract_team_matches(
 
             opponent_id = home_id
 
-            team_score = match.get(
-                "away_score"
+            team_score = to_score(
+                match.get("away_score")
             )
 
-            opponent_score = match.get(
-                "home_score"
+            opponent_score = to_score(
+                match.get("home_score")
             )
 
         else:
 
             continue
 
-        numeric_value = to_number(
-            value
-        )
+        # ====================================================
+        # SONUÇ
+        # ====================================================
 
-        # ----------------------------------------------------
-        # Sonucu belirle
-        # ----------------------------------------------------
-
-        result_status = "N/A"
+        match_result = "N/A"
 
         if (
-            isinstance(team_score, int)
-            and isinstance(opponent_score, int)
+            team_score is not None
+            and opponent_score is not None
         ):
 
             if team_score > opponent_score:
-                result_status = "W"
+                match_result = "W"
 
             elif team_score < opponent_score:
-                result_status = "L"
+                match_result = "L"
 
             else:
-                result_status = "D"
+                match_result = "D"
 
-        # ----------------------------------------------------
-        # Tarih
-        # ----------------------------------------------------
+        # ====================================================
+        # TARİH
+        # ====================================================
 
         timestamp = match.get(
             "time_start_timestamp"
@@ -194,6 +202,14 @@ def extract_team_matches(
         except Exception:
 
             pass
+
+        # ====================================================
+        # İSTATİSTİK DEĞERİ
+        # ====================================================
+
+        numeric_value = to_number(
+            value
+        )
 
         result.append({
 
@@ -217,7 +233,7 @@ def extract_team_matches(
 
             "opponent_score": opponent_score,
 
-            "result": result_status,
+            "result": match_result,
 
             "value": numeric_value,
 
@@ -235,7 +251,7 @@ def extract_team_matches(
 
 
 # ============================================================
-# İSTATİSTİK ANALİZİ
+# İSTATİSTİKSEL ÖZET
 # ============================================================
 
 def calculate_statistics(matches):
@@ -302,7 +318,150 @@ def calculate_statistics(matches):
 
 
 # ============================================================
-# ANALİZ NESNESİ
+# GOL ANALİZİ
+# ============================================================
+
+def calculate_goal_analysis(matches):
+
+    goals_for = []
+    goals_against = []
+
+    wins = 0
+    draws = 0
+    losses = 0
+
+    for match in matches:
+
+        team_score = match.get(
+            "team_score"
+        )
+
+        opponent_score = match.get(
+            "opponent_score"
+        )
+
+        if (
+            team_score is None
+            or opponent_score is None
+        ):
+            continue
+
+        goals_for.append(
+            team_score
+        )
+
+        goals_against.append(
+            opponent_score
+        )
+
+        if team_score > opponent_score:
+            wins += 1
+
+        elif team_score < opponent_score:
+            losses += 1
+
+        else:
+            draws += 1
+
+    if not goals_for:
+
+        return {
+
+            "available": False,
+
+            "matches": 0,
+
+            "goals_for": {
+
+                "count": 0,
+                "average": None,
+                "median": None,
+                "minimum": None,
+                "maximum": None
+
+            },
+
+            "goals_against": {
+
+                "count": 0,
+                "average": None,
+                "median": None,
+                "minimum": None,
+                "maximum": None
+
+            },
+
+            "wins": 0,
+            "draws": 0,
+            "losses": 0
+
+        }
+
+    return {
+
+        "available": True,
+
+        "matches": len(goals_for),
+
+        "goals_for": {
+
+            "count": len(goals_for),
+
+            "average": round(
+                statistics.mean(goals_for),
+                4
+            ),
+
+            "median": round(
+                statistics.median(goals_for),
+                4
+            ),
+
+            "minimum": min(
+                goals_for
+            ),
+
+            "maximum": max(
+                goals_for
+            )
+
+        },
+
+        "goals_against": {
+
+            "count": len(goals_against),
+
+            "average": round(
+                statistics.mean(goals_against),
+                4
+            ),
+
+            "median": round(
+                statistics.median(goals_against),
+                4
+            ),
+
+            "minimum": min(
+                goals_against
+            ),
+
+            "maximum": max(
+                goals_against
+            )
+
+        },
+
+        "wins": wins,
+
+        "draws": draws,
+
+        "losses": losses
+
+    }
+
+
+# ============================================================
+# ANA ANALİZ
 # ============================================================
 
 analysis = {
@@ -315,26 +474,26 @@ analysis = {
 
     "teams": TEAMS,
 
-    "statistics": {},
-
     "team_analysis": {}
 
 }
 
 
 # ============================================================
-# TAKIMLAR
+# TAKIMLARI ANALİZ ET
 # ============================================================
 
 for team_name, team_id in TEAMS.items():
 
     print("")
     print(
-        "================================"
+        "=========================================="
     )
-    print(team_name)
     print(
-        "================================"
+        team_name
+    )
+    print(
+        "=========================================="
     )
 
     analysis[
@@ -343,13 +502,61 @@ for team_name, team_id in TEAMS.items():
 
         "team_id": team_id,
 
+        "goals": {},
+
         "statistics": {}
 
     }
 
+    # ========================================================
+    # GOAL ANALİZİ
+    # ========================================================
+
+    goals_stat_info = source[
+        "data"
+    ][team_name].get(
+        "goals"
+    )
+
+    if goals_stat_info:
+
+        goal_matches = extract_team_matches(
+            team_name,
+            team_id,
+            goals_stat_info
+        )
+
+        goal_analysis = calculate_goal_analysis(
+            goal_matches
+        )
+
+        analysis[
+            "team_analysis"
+        ][team_name][
+            "goals"
+        ] = goal_analysis
+
+    else:
+
+        analysis[
+            "team_analysis"
+        ][team_name][
+            "goals"
+        ] = {
+            "available": False
+        }
+
+    # ========================================================
+    # DİĞER İSTATİSTİKLER
+    # ========================================================
+
     for stat_name, stat_info in source[
         "data"
     ][team_name].items():
+
+        # goals'u burada tekrar işlemiyoruz
+        if stat_name == "goals":
+            continue
 
         print(
             f"{stat_name} ...",
@@ -364,6 +571,42 @@ for team_name, team_id in TEAMS.items():
 
         stats = calculate_statistics(
             matches
+        )
+
+        # ====================================================
+        # EV
+        # ====================================================
+
+        home_matches = [
+
+            m for m in matches
+
+            if m.get(
+                "location"
+            ) == "home"
+
+        ]
+
+        # ====================================================
+        # DEPLASMAN
+        # ====================================================
+
+        away_matches = [
+
+            m for m in matches
+
+            if m.get(
+                "location"
+            ) == "away"
+
+        ]
+
+        home_stats = calculate_statistics(
+            home_matches
+        )
+
+        away_stats = calculate_statistics(
+            away_matches
         )
 
         analysis[
@@ -412,6 +655,36 @@ for team_name, team_id in TEAMS.items():
                     "maximum"
                 ],
 
+            "home_count":
+                home_stats[
+                    "count"
+                ],
+
+            "home_average":
+                home_stats[
+                    "average"
+                ],
+
+            "home_median":
+                home_stats[
+                    "median"
+                ],
+
+            "away_count":
+                away_stats[
+                    "count"
+                ],
+
+            "away_average":
+                away_stats[
+                    "average"
+                ],
+
+            "away_median":
+                away_stats[
+                    "median"
+                ],
+
             "matches":
                 matches
 
@@ -433,60 +706,142 @@ for team_name, team_id in TEAMS.items():
 
 
 # ============================================================
-# EV / DEPLASMAN AYRIMI
+# GOL EV / DEPLASMAN AYRIMI
 # ============================================================
 
-for team_name in analysis[
-    "team_analysis"
-]:
+for team_name in TEAMS:
 
-    stats_dict = analysis[
+    goal_info = analysis[
         "team_analysis"
     ][team_name][
-        "statistics"
+        "goals"
     ]
 
-    for stat_name, stat_info in stats_dict.items():
+    # Goals için gerçek maçları tekrar çıkar
+    goals_stat_info = source[
+        "data"
+    ][team_name].get(
+        "goals"
+    )
 
-        matches = stat_info[
-            "matches"
-        ]
+    if not goals_stat_info:
+        continue
 
-        home_matches = [
-            m for m in matches
-            if m["location"] == "home"
-        ]
+    goal_matches = extract_team_matches(
+        team_name,
+        TEAMS[team_name],
+        goals_stat_info
+    )
 
-        away_matches = [
-            m for m in matches
-            if m["location"] == "away"
-        ]
+    home_matches = [
 
-        stat_info[
-            "home_average"
-        ] = calculate_statistics(
-            home_matches
-        )["average"]
+        m for m in goal_matches
 
-        stat_info[
-            "away_average"
-        ] = calculate_statistics(
-            away_matches
-        )["average"]
+        if m.get(
+            "location"
+        ) == "home"
 
-        stat_info[
-            "home_count"
-        ] = len([
-            m for m in home_matches
-            if m["value"] is not None
-        ])
+    ]
 
-        stat_info[
-            "away_count"
-        ] = len([
-            m for m in away_matches
-            if m["value"] is not None
-        ])
+    away_matches = [
+
+        m for m in goal_matches
+
+        if m.get(
+            "location"
+        ) == "away"
+
+    ]
+
+    # --------------------------------------------------------
+    # Gol For
+    # --------------------------------------------------------
+
+    home_goals_for = [
+
+        m["team_score"]
+
+        for m in home_matches
+
+        if m["team_score"] is not None
+
+    ]
+
+    away_goals_for = [
+
+        m["team_score"]
+
+        for m in away_matches
+
+        if m["team_score"] is not None
+
+    ]
+
+    # --------------------------------------------------------
+    # Gol Against
+    # --------------------------------------------------------
+
+    home_goals_against = [
+
+        m["opponent_score"]
+
+        for m in home_matches
+
+        if m["opponent_score"] is not None
+
+    ]
+
+    away_goals_against = [
+
+        m["opponent_score"]
+
+        for m in away_matches
+
+        if m["opponent_score"] is not None
+
+    ]
+
+    def avg(values):
+
+        if not values:
+            return None
+
+        return round(
+            statistics.mean(values),
+            4
+        )
+
+    goal_info[
+        "home_matches"
+    ] = len(home_goals_for)
+
+    goal_info[
+        "away_matches"
+    ] = len(away_goals_for)
+
+    goal_info[
+        "home_goals_for_average"
+    ] = avg(
+        home_goals_for
+    )
+
+    goal_info[
+        "away_goals_for_average"
+    ] = avg(
+        away_goals_for
+    )
+
+    goal_info[
+        "home_goals_against_average"
+    ] = avg(
+        home_goals_against
+    )
+
+    goal_info[
+        "away_goals_against_average"
+    ] = avg(
+        away_goals_against
+    )
 
 
 # ============================================================
@@ -508,7 +863,7 @@ with open(
 
 
 # ============================================================
-# ÖZET
+# KONSOL ÖZETİ
 # ============================================================
 
 print("")
@@ -520,41 +875,71 @@ print("")
 
 for team_name in TEAMS:
 
+    team_data = analysis[
+        "team_analysis"
+    ][team_name]
+
+    goals = team_data[
+        "goals"
+    ]
+
+    print(
+        "------------------------------------------"
+    )
+
     print(
         team_name
     )
 
-    stats_dict = analysis[
-        "team_analysis"
-    ][team_name][
-        "statistics"
-    ]
-
-    available_count = 0
-
-    for stat_name, stat_info in stats_dict.items():
-
-        if stat_info[
-            "available"
-        ]:
-
-            available_count += 1
-
     print(
-        "Kullanılabilir istatistik:",
-        available_count,
-        "/",
-        len(stats_dict)
+        "Gol For ortalama:",
+        goals.get(
+            "goals_for",
+            {}
+        ).get(
+            "average"
+        )
     )
 
-    print("")
+    print(
+        "Gol Against ortalama:",
+        goals.get(
+            "goals_against",
+            {}
+        ).get(
+            "average"
+        )
+    )
 
+    print(
+        "W:",
+        goals.get(
+            "wins"
+        ),
+        "D:",
+        goals.get(
+            "draws"
+        ),
+        "L:",
+        goals.get(
+            "losses"
+        )
+    )
+
+    print(
+        "Toplam istatistik:",
+        len(
+            team_data[
+                "statistics"
+            ]
+        )
+    )
+
+print("")
 print(
     "Çıktı:"
 )
-
 print(
     OUTPUT_FILE
 )
-
 print("")
