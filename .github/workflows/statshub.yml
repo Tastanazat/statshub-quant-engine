@@ -2216,26 +2216,48 @@ jobs:
       # =========================================================
 
       - name: Final validation
+        shell: bash
         run: |
-          echo ""
+          set -e
+
           echo "=========================================="
           echo "STATSHUB QUANT ENGINE"
           echo "WORKFLOW SUCCESS"
           echo "=========================================="
-          echo ""
-
-          echo "StatsHub scraping       : PASS"
-          echo "StatsHub analysis       : PASS"
-          echo "Poisson model           : PASS"
-          echo "Model validation        : PASS"
-          echo "Prediction recording    : PASS"
-          echo "Invalid cleanup         : PASS"
-          echo "Settlement Engine       : PASS"
-          echo "Performance Engine      : PASS"
-          echo "Calibration Engine      : PASS"
-          echo "Database validation     : PASS"
-          echo "Artifact upload         : PASS"
-          echo "Database persistence    : PASS"
 
           echo ""
+          echo "StatsHub scraping    : PASS"
+          echo "StatsHub analysis    : PASS"
+          echo "Poisson model        : PASS"
+          echo "Model validation     : PASS"
+          echo "Prediction recording : PASS"
+          echo "Invalid cleanup      : PASS"
+          echo "Settlement Engine    : PASS"
+          echo "Performance Engine   : PASS"
+          echo "Calibration Engine   : PASS"
+          echo "Model Registry       : PASS"
+          echo "Database validation  : PASS"
+          echo "Artifact upload      : PASS"
+          echo "Database persistence : PASS"
+
+          echo ""
+          echo "=========================================="
           echo "SYSTEM READY"
+          echo "=========================================="
+
+          if [ -f "data/database/quant_engine.db" ]; then
+            echo "Database file         : PASS"
+          else
+            echo "Database file         : FAIL"
+            exit 1
+          fi
+
+          if [ -f "data/models/calibration.json" ]; then
+            echo "Calibration metadata  : PASS"
+          else
+            echo "Calibration metadata  : FAIL"
+            exit 1
+          fi
+
+          echo ""
+          echo "FINAL VALIDATION: PASS""
