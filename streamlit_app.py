@@ -1,295 +1,337 @@
 import streamlit as st
 import requests
 import re
-from urllib.parse import urljoin
 
 st.set_page_config(
-    page_title="StatsHub Network Finder",
+    page_title="StatsHub Core API Finder",
     page_icon="🎯",
     layout="wide"
 )
 
-st.title("🎯 StatsHub Network Finder")
+st.title("🎯 StatsHub Core API Finder")
 
-url = st.text_input(
-    "StatsHub maç URL'si",
-    "https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
+JS_URL = (
+    "https://www.statshub.com/_next/static/chunks/pages/"
+    "fixture/%5BfixtureSlug%5D/%5BfixtureId%5D-1a82e0e92c7c1aa6.js"
 )
 
-if st.button("🚀 NETWORK ÇAĞRILARINI BUL", type="primary"):
+if st.button("🔍 ANA VERİ KAYNAĞINI BUL", type="primary"):
 
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9"
+        "Accept": "*/*"
     }
 
-    # --------------------------------------------------
-    # SAYFAYI AL
-    # --------------------------------------------------
-
-    with st.spinner("StatsHub sayfası alınıyor..."):
+    with st.spinner("StatsHub fixture JavaScript okunuyor..."):
 
         try:
             response = requests.get(
-                url,
+                JS_URL,
                 headers=headers,
                 timeout=20
             )
 
-            html = response.text
+            js = response.text
 
         except Exception as e:
-            st.error(f"Bağlantı hatası: {e}")
+            st.error(f"Hata: {e}")
             st.stop()
 
     st.success(
-        f"StatsHub bağlantısı başarılı — HTTP {response.status_code}"
+        f"JavaScript alındı — HTTP {response.status_code}"
     )
 
     st.write(
-        f"HTML uzunluğu: **{len(html):,} karakter**"
+        f"Dosya boyutu: **{len(js):,} karakter**"
     )
 
-    # --------------------------------------------------
-    # JAVASCRIPT DOSYALARINI BUL
-    # --------------------------------------------------
+    # =====================================================
+    # 1 — EVENT ID
+    # =====================================================
 
-    st.subheader("📦 JavaScript dosyaları")
+    st.subheader("🆔 1. EVENT ID kaynakları")
 
-    scripts = re.findall(
-        r'<script[^>]+src=["\']([^"\']+)["\']',
-        html,
+    patterns_event = [
+        r'aZ\.events\.id',
+        r'events\.id',
+        r'eventId',
+        r'eventID'
+    ]
+
+    event_positions = []
+
+    for pattern in patterns_event:
+
+        for match in re.finditer(
+            pattern,
+            js,
+            flags=re.I
+        ):
+
+            event_positions.append(match.start())
+
+    event_positions = sorted(
+        set(event_positions)
+    )
+
+    st.write(
+        f"Event ID ile ilgili bölge: **{len(event_positions)}**"
+    )
+
+    for i, pos in enumerate(
+        event_positions[:15],
+        1
+    ):
+
+        start = max(0, pos - 1000)
+        end = min(len(js), pos + 1500)
+
+        with st.expander(
+            f"EVENT ID #{i}"
+        ):
+
+            st.code(
+                js[start:end],
+                language="javascript"
+            )
+
+    # =====================================================
+    # 2 — t2 HOME PLAYER STATS
+    # =====================================================
+
+    st.subheader("🏠 2. t2 — Home Player Stats")
+
+    t2_positions = [
+        m.start()
+        for m in re.finditer(
+            r'\bt2\b',
+            js
+        )
+    ]
+
+    st.write(
+        f"t2 kullanım sayısı: **{len(t2_positions)}**"
+    )
+
+    for i, pos in enumerate(
+        t2_positions[:15],
+        1
+    ):
+
+        start = max(0, pos - 1000)
+        end = min(len(js), pos + 1500)
+
+        with st.expander(
+            f"t2 #{i}"
+        ):
+
+            st.code(
+                js[start:end],
+                language="javascript"
+            )
+
+    # =====================================================
+    # 3 — t9 AWAY PLAYER STATS
+    # =====================================================
+
+    st.subheader("✈️ 3. t9 — Away Player Stats")
+
+    t9_positions = [
+        m.start()
+        for m in re.finditer(
+            r'\bt9\b',
+            js
+        )
+    ]
+
+    st.write(
+        f"t9 kullanım sayısı: **{len(t9_positions)}**"
+    )
+
+    for i, pos in enumerate(
+        t9_positions[:15],
+        1
+    ):
+
+        start = max(0, pos - 1000)
+        end = min(len(js), pos + 1500)
+
+        with st.expander(
+            f"t9 #{i}"
+        ):
+
+            st.code(
+                js[start:end],
+                language="javascript"
+            )
+
+    # =====================================================
+    # 4 — FIXTURE ID
+    # =====================================================
+
+    st.subheader("📌 4. Fixture ID / aD")
+
+    ad_positions = [
+        m.start()
+        for m in re.finditer(
+            r'\baD\b',
+            js
+        )
+    ]
+
+    st.write(
+        f"aD kullanım sayısı: **{len(ad_positions)}**"
+    )
+
+    for i, pos in enumerate(
+        ad_positions[:10],
+        1
+    ):
+
+        start = max(0, pos - 700)
+        end = min(len(js), pos + 1200)
+
+        with st.expander(
+            f"aD #{i}"
+        ):
+
+            st.code(
+                js[start:end],
+                language="javascript"
+            )
+
+    # =====================================================
+    # 5 — FETCH
+    # =====================================================
+
+    st.subheader("🌐 5. FETCH çağrıları")
+
+    fetch_positions = [
+        m.start()
+        for m in re.finditer(
+            r'\bfetch\s*\(',
+            js,
+            flags=re.I
+        )
+    ]
+
+    st.write(
+        f"Fetch sayısı: **{len(fetch_positions)}**"
+    )
+
+    for i, pos in enumerate(
+        fetch_positions[:30],
+        1
+    ):
+
+        start = max(0, pos - 800)
+        end = min(len(js), pos + 1800)
+
+        snippet = js[start:end]
+
+        # İlgisiz çağrıları mümkün olduğunca ayır
+        keywords = [
+            "/api/",
+            "event",
+            "fixture",
+            "player",
+            "team",
+            "stat",
+            "lineup",
+            "match"
+        ]
+
+        score = sum(
+            1
+            for word in keywords
+            if word.lower() in snippet.lower()
+        )
+
+        with st.expander(
+            f"FETCH #{i} — İlgililik skoru: {score}"
+        ):
+
+            st.code(
+                snippet,
+                language="javascript"
+            )
+
+    # =====================================================
+    # 6 — API PATH'LERİ
+    # =====================================================
+
+    st.subheader("🔗 6. API yolları")
+
+    api_matches = re.findall(
+        r'["\']([^"\']*/api/[^"\']*)["\']',
+        js,
         flags=re.I
     )
 
-    js_urls = []
+    api_unique = []
 
-    for src in scripts:
+    for value in api_matches:
 
-        full_url = urljoin(url, src)
-
-        if full_url not in js_urls:
-            js_urls.append(full_url)
+        if value not in api_unique:
+            api_unique.append(value)
 
     st.write(
-        f"Bulunan JavaScript: **{len(js_urls)}**"
+        f"Bulunan API yolu: **{len(api_unique)}**"
     )
 
-    # --------------------------------------------------
-    # JS DOSYALARINI İNDİR
-    # --------------------------------------------------
+    for i, value in enumerate(
+        api_unique[:50],
+        1
+    ):
 
-    js_files = []
-
-    progress = st.progress(0)
-
-    for i, js_url in enumerate(js_urls):
-
-        try:
-
-            r = requests.get(
-                js_url,
-                headers=headers,
-                timeout=10
-            )
-
-            if r.status_code == 200:
-
-                text = r.text
-
-                # Güvenlik: devasa dosyaları sınırlıyoruz
-                if len(text) > 3_000_000:
-                    text = text[:3_000_000]
-
-                js_files.append({
-                    "url": js_url,
-                    "text": text
-                })
-
-        except Exception:
-            pass
-
-        progress.progress(
-            (i + 1) / max(len(js_urls), 1)
+        st.code(
+            f"{i}. {value}",
+            language="text"
         )
 
-    st.success(
-        f"{len(js_files)} JavaScript dosyası indirildi."
-    )
+    # =====================================================
+    # 7 — PLAYER / TEAM STATS KULLANIMI
+    # =====================================================
 
-    # --------------------------------------------------
-    # SADECE API ÇAĞRISI ÇEVRESİNDEKİ KODU BUL
-    # --------------------------------------------------
+    st.subheader("📊 7. Player / Team Stats")
 
-    st.subheader("🔎 Network çağrıları")
-
-    search_patterns = [
-        ("FETCH", r'\bfetch\s*\('),
-        ("AXIOS", r'\baxios\b'),
-        ("XMLHttpRequest", r'\bXMLHttpRequest\b'),
-        ("GRAPHQL", r'\bgraphql\b'),
-        ("API PATH", r'["\'][^"\']*/api/[^"\']*["\']'),
-        ("BASE URL", r'\bbaseURL\b'),
-        ("API URL", r'\bapiUrl\b'),
-        ("EVENT ID", r'\beventId\b'),
-        ("MATCH STATS", r'\bmatchStats\b'),
-        ("PLAYER STATS", r'\bplayerStats\b'),
-        ("TEAM STATS", r'\bteamStats\b'),
-        ("LINEUPS", r'\blineups\b')
-    ]
-
-    findings = []
-
-    for js in js_files:
-
-        text = js["text"]
-
-        for name, pattern in search_patterns:
-
-            matches = list(
-                re.finditer(
-                    pattern,
-                    text,
-                    flags=re.I
-                )
-            )
-
-            # Her dosyadan en fazla 5 bölge
-            for match in matches[:5]:
-
-                start = max(
-                    0,
-                    match.start() - 500
-                )
-
-                end = min(
-                    len(text),
-                    match.end() + 1200
-                )
-
-                snippet = text[start:end]
-
-                findings.append({
-                    "name": name,
-                    "url": js["url"],
-                    "snippet": snippet
-                })
-
-    st.write(
-        f"Bulunan önemli kod bölgesi: **{len(findings)}**"
-    )
-
-    # --------------------------------------------------
-    # SADECE İSTATİSTİKLE İLGİLİ OLANLARI GÖSTER
-    # --------------------------------------------------
-
-    important_words = [
-        "fetch",
-        "axios",
-        "/api/",
-        "graphql",
-        "eventId",
-        "matchStats",
+    important_patterns = [
+        "homeTeamPlayerStats",
+        "awayTeamPlayerStats",
         "playerStats",
         "teamStats",
+        "matchStats",
+        "statistics",
         "lineups"
     ]
 
-    filtered = []
+    for word in important_patterns:
 
-    for item in findings:
-
-        combined = (
-            item["name"] +
-            " " +
-            item["snippet"]
-        ).lower()
-
-        score = 0
-
-        for word in important_words:
-
-            if word.lower() in combined:
-                score += 1
-
-        item["score"] = score
-
-        if score >= 1:
-            filtered.append(item)
-
-    filtered.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-    # --------------------------------------------------
-    # SONUÇLARI GÖSTER
-    # --------------------------------------------------
-
-    st.subheader("🎯 En önemli sonuçlar")
-
-    if not filtered:
-
-        st.warning(
-            "Statik JavaScript taramasında network çağrısı bulunamadı."
-        )
-
-    else:
-
-        for i, item in enumerate(
-            filtered[:30],
-            1
-        ):
-
-            with st.expander(
-                f"#{i} — {item['name']} — Skor {item['score']}"
-            ):
-
-                st.write("JavaScript dosyası:")
-
-                st.code(
-                    item["url"],
-                    language="text"
-                )
-
-                st.write("Kod:")
-
-                st.code(
-                    item["snippet"],
-                    language="javascript"
-                )
-
-    # --------------------------------------------------
-    # MAÇ ID'LERİ
-    # --------------------------------------------------
-
-    st.subheader("🆔 Maç kimlikleri")
-
-    patterns = {
-        "Fixture": r'"internalId"\s*:\s*(\d+)',
-        "PSV / Home": r'"homeTeamId"\s*:\s*(\d+)',
-        "Shakhtar / Away": r'"awayTeamId"\s*:\s*(\d+)'
-    }
-
-    for name, pattern in patterns.items():
-
-        match = re.search(
-            pattern,
-            html,
-            flags=re.I
-        )
-
-        if match:
-
-            st.write(
-                f"**{name}:** `{match.group(1)}`"
+        positions = [
+            m.start()
+            for m in re.finditer(
+                re.escape(word),
+                js,
+                flags=re.I
             )
+        ]
+
+        st.write(
+            f"**{word}:** {len(positions)}"
+        )
+
+    # =====================================================
+    # SONUÇ
+    # =====================================================
 
     st.divider()
 
+    st.success(
+        "Ana fixture JavaScript dosyasının taraması tamamlandı."
+    )
+
     st.info(
-        "Buradaki amaç henüz istatistikleri çekmek değil. "
-        "Önce StatsHub'ın kullandığı gerçek network/API çağrısını "
-        "tespit ediyoruz."
+        "Özellikle EVENT ID, t2, t9 ve FETCH bölümlerini "
+        "inceleyeceğiz. Gerçek StatsHub istatistik API'sini "
+        "buradan ayıklamaya çalışacağız."
     )
