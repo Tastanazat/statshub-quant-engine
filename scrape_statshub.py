@@ -1,218 +1,202 @@
-import requests
+from playwright.sync_api import sync_playwright
 import json
 import os
 import time
 
-# ============================================================
-# STATSHUB TEAM STATS API DISCOVERY
-# ============================================================
+URL = "https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
 
-BASE = "https://www.statshub.com"
-
-TEAMS = {
-    "PSV": 2952,
-    "Shakhtar": 3313,
-}
-
-TOURNAMENT_IDS = "7,37,330,340,679,17015"
+TARGETS = [
+    "CORNERS",
+    "SHOTS",
+    "CROSSES",
+    "TACKLES",
+    "POSSESSION",
+]
 
 os.makedirs("data", exist_ok=True)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json,text/plain,*/*",
-}
+captured = []
 
-# ============================================================
-# STATSHUB'DA GÖRÜNEN TEAM STATISTICS ANAHTARLARI
-# ============================================================
+with sync_playwright() as p:
 
-STAT_KEYS = [
-    "goals",
-    "corners",
-    "shots",
-    "cards",
-    "crosses",
-    "bigChanceCreated",
-    "bigChanceMissed",
-    "bigChanceScored",
-    "expectedGoals",
-    "shotsOnGoal",
-    "shotsOffGoal",
-    "totalShotsInsideBox",
-    "totalShotsOutsideBox",
-    "totalClearance",
-    "dispossessed",
-    "errorsLeadToGoal",
-    "errorsLeadToShot",
-    "fouls",
-    "goalkeeperSaves",
-    "interceptionWon",
-    "tackles",
-    "freeKicks",
-    "goalKicks",
-    "throwIns",
-    "possession",
-    "offsides",
-    "passes",
-    "touchesInOppBox",
-    "redCards",
-    "yellowCards",
-]
+    browser = p.chromium.launch(
+        headless=True
+    )
 
-# ============================================================
-# SONUÇLAR
-# ============================================================
+    page = browser.new_page()
 
-results = {}
+    # =====================================================
+    # TÜM API İSTEKLERİNİ YAKALA
+    # =====================================================
 
-valid_keys = []
+    def handle_response(response):
 
-print("")
-print("==========================================")
-print("STATSHUB TEAM STATS API TESTİ")
-print("==========================================")
-print("")
+        try:
+            url = response.url
 
-# ============================================================
-# HER TAKIM + HER İSTATİSTİK
-# ============================================================
+            if "/api/" not in url:
+                return
 
-for team_name, team_id in TEAMS.items():
+            record = {
+                "status": response.status,
+                "url": url,
+                "method": response.request.method,
+            }
 
-    print("")
-    print("------------------------------------------")
-    print(team_name, "TEAM ID:", team_id)
-    print("------------------------------------------")
+            if (
+                "/event-statistics" in url
+                or "/team/" in url
+            ):
+                try:
+                    record["body"] = response.json()
+                except Exception:
+                    record["body"] = None
 
-    results[team_name] = {}
+            captured.append(record)
 
-    for stat_key in STAT_KEYS:
+        except Exception:
+            pass
 
-        url = (
-            f"{BASE}/api/team/{team_id}/event-statistics"
-            f"?eventType=all"
-            f"&statisticKey={stat_key}"
-            f"&eventHalf=ALL"
-            f"&tournamentIds={TOURNAMENT_IDS}"
-            f"&limit=20"
+    page.on(
+        "response",
+        handle_response
+    )
+
+    print("StatsHub açılıyor...")
+
+    page.goto(
+        URL,
+        wait_until="networkidle",
+        timeout=120000
+    )
+
+    time.sleep(3)
+
+    # =====================================================
+    # TEAM STATS'A GİT
+    # =====================================================
+
+    print("Team Stats aranıyor...")
+
+    try:
+
+        team_stats = page.get_by_text(
+            "Team Stats",
+            exact=True
+        ).first
+
+        team_stats.click(
+            timeout=10000
         )
+
+        time.sleep(3)
+
+    except Exception as e:
 
         print(
-            f"{team_name} | {stat_key} ...",
-            end=" "
+            "Team Stats tıklama hatası:",
+            e
         )
+
+    # =====================================================
+    # HER KATEGORİYİ TEK TEK TIKLA
+    # =====================================================
+
+    for target in TARGETS:
+
+        print("")
+        print(
+            "================================"
+        )
+        print(
+            "TEST:",
+            target
+        )
+        print(
+            "================================"
+        )
+
+        before = len(captured)
 
         try:
 
-            response = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=30
+            locator = page.get_by_text(
+                target,
+                exact=True
+            ).first
+
+            locator.click(
+                timeout=5000,
+                force=True
             )
 
-            status = response.status_code
+            print(
+                target,
+                "tıklandı."
+            )
 
-            try:
-                data = response.json()
-            except Exception:
-                data = {
-                    "raw_text": response.text[:10000]
-                }
-
-            # ------------------------------------------------
-            # Veri kontrolü
-            # ------------------------------------------------
-
-            has_data = False
-            data_count = 0
-
-            if isinstance(data, dict):
-
-                raw_data = data.get("data")
-
-                if isinstance(raw_data, list):
-
-                    data_count = len(raw_data)
-
-                    if data_count > 0:
-                        has_data = True
-
-                elif isinstance(raw_data, dict):
-
-                    has_data = len(raw_data) > 0
-
-                    data_count = len(raw_data)
-
-            elif isinstance(data, list):
-
-                data_count = len(data)
-
-                if data_count > 0:
-                    has_data = True
-
-            # ------------------------------------------------
-            # Sonucu kaydet
-            # ------------------------------------------------
-
-            results[team_name][stat_key] = {
-                "url": url,
-                "status_code": status,
-                "has_data": has_data,
-                "data_count": data_count,
-                "data": data,
-            }
-
-            if status == 200 and has_data:
-
-                print(
-                    "OK",
-                    f"({data_count} kayıt)"
-                )
-
-                if stat_key not in valid_keys:
-                    valid_keys.append(stat_key)
-
-            elif status == 200:
-
-                print(
-                    "200 - BOŞ"
-                )
-
-            else:
-
-                print(
-                    f"HTTP {status}"
-                )
+            # API çağrısının oluşmasını bekle
+            time.sleep(2)
 
         except Exception as e:
 
             print(
-                "HATA:",
-                str(e)
+                target,
+                "tıklanamadı:",
+                e
             )
 
-            results[team_name][stat_key] = {
-                "url": url,
-                "error": str(e),
-            }
+        # Bu tıklamadan sonra gelen yeni API'leri göster
+        new_items = captured[before:]
 
-        # StatsHub'ı gereksiz yere hızlı sorgulamamak için
-        time.sleep(0.15)
+        for item in new_items:
+
+            if (
+                "/event-statistics" in
+                item["url"]
+            ):
+
+                print("")
+                print(
+                    "YAKALANDI:"
+                )
+
+                print(
+                    item["status"]
+                )
+
+                print(
+                    item["url"]
+                )
+
+    browser.close()
 
 
 # ============================================================
-# TÜM SONUÇLARI KAYDET
+# SADECE EVENT-STATISTICS İSTEKLERİNİ AYIR
+# ============================================================
+
+event_stats = []
+
+for item in captured:
+
+    if "/event-statistics" in item["url"]:
+
+        event_stats.append(item)
+
+
+# ============================================================
+# KAYDET
 # ============================================================
 
 with open(
-    "data/statshub_team_statistics_probe.json",
+    "data/statshub_missing_stats_network.json",
     "w",
     encoding="utf-8"
 ) as f:
 
     json.dump(
-        results,
+        event_stats,
         f,
         ensure_ascii=False,
         indent=2
@@ -220,51 +204,21 @@ with open(
 
 
 # ============================================================
-# GEÇERLİ ANAHTARLAR
+# URL LİSTESİ
 # ============================================================
 
 with open(
-    "data/statshub_valid_team_stats.txt",
+    "data/statshub_missing_stats_urls.txt",
     "w",
     encoding="utf-8"
 ) as f:
 
-    for key in valid_keys:
+    for item in event_stats:
 
-        f.write(key)
-        f.write("\n")
+        f.write(
+            f'{item["status"]} | {item["url"]}\n'
+        )
 
-
-# ============================================================
-# ÖZET JSON
-# ============================================================
-
-summary = {
-    "source": "StatsHub",
-    "teams": TEAMS,
-    "tournament_ids": TOURNAMENT_IDS,
-    "tested_keys": STAT_KEYS,
-    "valid_keys": valid_keys,
-    "valid_key_count": len(valid_keys),
-}
-
-with open(
-    "data/statshub_team_stats_summary.json",
-    "w",
-    encoding="utf-8"
-) as f:
-
-    json.dump(
-        summary,
-        f,
-        ensure_ascii=False,
-        indent=2
-    )
-
-
-# ============================================================
-# EKRAN ÖZETİ
-# ============================================================
 
 print("")
 print("")
@@ -272,34 +226,13 @@ print("==========================================")
 print("TARAMA TAMAMLANDI")
 print("==========================================")
 print("")
-
 print(
-    "Test edilen istatistik:",
-    len(STAT_KEYS)
+    "Yakalanan event-statistics:",
+    len(event_stats)
 )
-
+print("")
 print(
-    "Gerçek veri döndüren:",
-    len(valid_keys)
+    "Sonuç:",
+    "data/statshub_missing_stats_network.json"
 )
-
-print("")
-print("GEÇERLİ STATSHUB TEAM STATS KEY'LERİ:")
-print("")
-
-for i, key in enumerate(
-    valid_keys,
-    start=1
-):
-
-    print(
-        f"{i}. {key}"
-    )
-
-print("")
-print("Dosyalar oluşturuldu:")
-print("")
-print("1. statshub_team_statistics_probe.json")
-print("2. statshub_valid_team_stats.txt")
-print("3. statshub_team_stats_summary.json")
 print("")
