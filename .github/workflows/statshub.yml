@@ -116,7 +116,10 @@ jobs:
               )
 
           print("DATABASE VALIDATION: PASS")
-          print("Tables:", ", ".join(sorted(tables)))
+          print(
+              "Tables:",
+              ", ".join(sorted(tables))
+          )
 
           conn.close()
           PY
@@ -189,7 +192,9 @@ jobs:
           # MODEL VERSION
           # -----------------------------------------------------
 
-          model_version = model.get("model_version")
+          model_version = model.get(
+              "model_version"
+          )
 
           if not model_version:
               raise SystemExit(
@@ -245,13 +250,17 @@ jobs:
                   "lambda.away bulunamadı."
               )
 
-          if not math.isfinite(float(lambda_home)):
+          if not math.isfinite(
+              float(lambda_home)
+          ):
               raise SystemExit(
                   "MATCH MODEL ERROR: "
                   "lambda.home geçersiz."
               )
 
-          if not math.isfinite(float(lambda_away)):
+          if not math.isfinite(
+              float(lambda_away)
+          ):
               raise SystemExit(
                   "MATCH MODEL ERROR: "
                   "lambda.away geçersiz."
@@ -306,7 +315,9 @@ jobs:
               raise SystemExit(
                   "MATCH MODEL ERROR: "
                   "Eksik probability alanları: "
-                  + ", ".join(missing_probabilities)
+                  + ", ".join(
+                      missing_probabilities
+                  )
               )
 
           # -----------------------------------------------------
@@ -315,7 +326,9 @@ jobs:
 
           for key in required_probabilities:
 
-              value = float(probabilities[key])
+              value = float(
+                  probabilities[key]
+              )
 
               if not math.isfinite(value):
                   raise SystemExit(
@@ -339,7 +352,9 @@ jobs:
               + float(probabilities["away_win"])
           )
 
-          if abs(one_x_two_sum - 1.0) > 1e-6:
+          if abs(
+              one_x_two_sum - 1.0
+          ) > 1e-6:
               raise SystemExit(
                   "MATCH MODEL ERROR: "
                   "1X2 olasılıkları toplamı 1 değil."
@@ -358,14 +373,20 @@ jobs:
           ]:
 
               over = float(
-                  probabilities[f"over_{line}"]
+                  probabilities[
+                      f"over_{line}"
+                  ]
               )
 
               under = float(
-                  probabilities[f"under_{line}"]
+                  probabilities[
+                      f"under_{line}"
+                  ]
               )
 
-              if abs((over + under) - 1.0) > 1e-6:
+              if abs(
+                  (over + under) - 1.0
+              ) > 1e-6:
                   raise SystemExit(
                       f"MATCH MODEL ERROR: "
                       f"O/U {line} toplamı 1 değil."
@@ -380,14 +401,16 @@ jobs:
               + float(probabilities["btts_no"])
           )
 
-          if abs(btts_sum - 1.0) > 1e-6:
+          if abs(
+              btts_sum - 1.0
+          ) > 1e-6:
               raise SystemExit(
                   "MATCH MODEL ERROR: "
                   "BTTS toplamı 1 değil."
               )
 
           # -----------------------------------------------------
-          # VALIDATION
+          # MODEL INTERNAL VALIDATION
           # -----------------------------------------------------
 
           validation = model.get(
@@ -470,7 +493,16 @@ jobs:
 
 
       # =========================================================
-      # 12. SETTLEMENT ENGINE
+      # 12. CLEANUP OLD INVALID SETTLEMENT
+      # =========================================================
+
+      - name: Cleanup old invalid settlement
+        run: |
+          python cleanup_invalid_settlement.py
+
+
+      # =========================================================
+      # 13. RUN STATSHUB SETTLEMENT ENGINE
       # =========================================================
 
       - name: Run StatsHub settlement engine
@@ -479,7 +511,7 @@ jobs:
 
 
       # =========================================================
-      # 13. VERIFY PREDICTION DATABASE
+      # 14. VERIFY PREDICTION DATABASE
       # =========================================================
 
       - name: Verify prediction database
@@ -501,7 +533,7 @@ jobs:
           cursor = conn.cursor()
 
           # -----------------------------------------------------
-          # PREDICTION COUNT
+          # COUNT
           # -----------------------------------------------------
 
           cursor.execute("""
@@ -509,9 +541,9 @@ jobs:
               FROM predictions
           """)
 
-          prediction_count = cursor.fetchone()[0]
+          count = cursor.fetchone()[0]
 
-          if prediction_count < 1:
+          if count < 1:
               raise SystemExit(
                   "PREDICTION ERROR: "
                   "Prediction kaydı bulunamadı."
@@ -537,19 +569,95 @@ jobs:
               LIMIT 1
           """)
 
-          prediction = cursor.fetchone()
+          row = cursor.fetchone()
 
-          if prediction is None:
+          if row is None:
               raise SystemExit(
                   "PREDICTION ERROR: "
                   "Son prediction bulunamadı."
               )
 
-          if int(prediction["model_locked"]) != 1:
+          if int(
+              row["model_locked"]
+          ) != 1:
               raise SystemExit(
                   "PREDICTION ERROR: "
                   "Model LOCKED değil."
               )
+
+          print("")
+          print("==========================================")
+          print("PREDICTION DATABASE VALIDATION: PASS")
+          print("==========================================")
+          print("")
+          print(
+              "Prediction ID:",
+              row["id"]
+          )
+          print(
+              "Match ID:",
+              row["match_id"]
+          )
+          print(
+              "Model:",
+              row["model_version"]
+          )
+          print(
+              "Model Locked:",
+              row["model_locked"]
+          )
+          print(
+              "Home Win:",
+              row["home_win_probability"]
+          )
+          print(
+              "Draw:",
+              row["draw_probability"]
+          )
+          print(
+              "Away Win:",
+              row["away_win_probability"]
+          )
+          print(
+              "Home Lambda:",
+              row["home_lambda"]
+          )
+          print(
+              "Away Lambda:",
+              row["away_lambda"]
+          )
+          print(
+              "Total Predictions:",
+              count
+          )
+          print("")
+
+          conn.close()
+          PY
+
+
+      # =========================================================
+      # 15. VERIFY SETTLEMENT DATABASE
+      # =========================================================
+
+      - name: Verify settlement database
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import os
+
+          db = "data/database/quant_engine.db"
+
+          if not os.path.exists(db):
+              raise SystemExit(
+                  "SETTLEMENT DATABASE ERROR: "
+                  "Database bulunamadı."
+              )
+
+          conn = sqlite3.connect(db)
+          conn.row_factory = sqlite3.Row
+
+          cursor = conn.cursor()
 
           # -----------------------------------------------------
           # SETTLEMENT COUNT
@@ -563,7 +671,7 @@ jobs:
           settlement_count = cursor.fetchone()[0]
 
           # -----------------------------------------------------
-          # LATEST MATCH
+          # CURRENT MATCH
           # -----------------------------------------------------
 
           cursor.execute("""
@@ -582,72 +690,109 @@ jobs:
 
           match = cursor.fetchone()
 
+          if match is None:
+              raise SystemExit(
+                  "SETTLEMENT DATABASE ERROR: "
+                  "PSV-Shakhtar fixture bulunamadı."
+              )
+
           print("")
           print("==========================================")
-          print("PREDICTION DATABASE VALIDATION: PASS")
+          print("SETTLEMENT DATABASE VALIDATION")
           print("==========================================")
           print("")
+
           print(
-              "Prediction ID:",
-              prediction["id"]
+              "Fixture:",
+              match["statshub_fixture_id"]
           )
+
           print(
-              "Match ID:",
-              prediction["match_id"]
+              "Match:",
+              match["home_team"],
+              "vs",
+              match["away_team"]
           )
+
           print(
-              "Model:",
-              prediction["model_version"]
+              "Status:",
+              match["status"]
           )
+
           print(
-              "Model Locked:",
-              prediction["model_locked"]
+              "Final score:",
+              match["final_home_score"],
+              "-",
+              match["final_away_score"]
           )
+
           print(
-              "Home Win:",
-              prediction["home_win_probability"]
-          )
-          print(
-              "Draw:",
-              prediction["draw_probability"]
-          )
-          print(
-              "Away Win:",
-              prediction["away_win_probability"]
-          )
-          print(
-              "Home Lambda:",
-              prediction["home_lambda"]
-          )
-          print(
-              "Away Lambda:",
-              prediction["away_lambda"]
-          )
-          print(
-              "Total Predictions:",
-              prediction_count
-          )
-          print(
-              "Total Settlements:",
+              "Total settlements:",
               settlement_count
           )
 
-          if match is not None:
+          # -----------------------------------------------------
+          # IF MATCH IS NOT FINISHED
+          # -----------------------------------------------------
+
+          if match["status"] == "notstarted":
+
+              if (
+                  match["final_home_score"] is not None
+                  or
+                  match["final_away_score"] is not None
+              ):
+                  raise SystemExit(
+                      "SETTLEMENT DATABASE ERROR: "
+                      "notstarted maçta final skor var."
+                  )
 
               print("")
-              print("Fixture:", match["statshub_fixture_id"])
-              print("Home:", match["home_team"])
-              print("Away:", match["away_team"])
-              print("Status:", match["status"])
               print(
-                  "Final Home Score:",
-                  match["final_home_score"]
+                  "MATCH STATUS: NOT STARTED"
               )
               print(
-                  "Final Away Score:",
+                  "Final result: NOT AVAILABLE"
+              )
+              print(
+                  "Settlement: NONE EXPECTED"
+              )
+
+          # -----------------------------------------------------
+          # IF MATCH IS FINISHED
+          # -----------------------------------------------------
+
+          elif match["status"] in (
+              "finished",
+              "ended",
+              "completed"
+          ):
+
+              if (
+                  match["final_home_score"] is None
+                  or
+                  match["final_away_score"] is None
+              ):
+                  raise SystemExit(
+                      "SETTLEMENT DATABASE ERROR: "
+                      "Finished maçta final skor yok."
+                  )
+
+              print("")
+              print(
+                  "MATCH STATUS: FINISHED"
+              )
+              print(
+                  "Final result:",
+                  match["final_home_score"],
+                  "-",
                   match["final_away_score"]
               )
 
+          print("")
+          print(
+              "SETTLEMENT DATABASE VALIDATION: PASS"
+          )
           print("")
 
           conn.close()
@@ -655,7 +800,7 @@ jobs:
 
 
       # =========================================================
-      # 14. VERIFY OUTPUT FILES
+      # 16. VERIFY OUTPUT FILES
       # =========================================================
 
       - name: Verify output files
@@ -674,6 +819,7 @@ jobs:
           echo "StatsHub Team Analysis   : OK"
           echo "StatsHub Match Model     : OK"
           echo "Quant Engine Database    : OK"
+          echo "Settlement Engine        : OK"
 
           echo ""
           echo "Data files:"
@@ -681,7 +827,7 @@ jobs:
 
 
       # =========================================================
-      # 15. UPLOAD ARTIFACT
+      # 17. UPLOAD ARTIFACT
       #
       # SADECE 1 KEZ
       # =========================================================
@@ -696,7 +842,7 @@ jobs:
 
 
       # =========================================================
-      # 16. PERSIST DATABASE
+      # 18. PERSIST DATABASE
       # =========================================================
 
       - name: Persist database
@@ -723,7 +869,7 @@ jobs:
 
 
       # =========================================================
-      # 17. FINAL
+      # 19. FINAL
       # =========================================================
 
       - name: Final validation
@@ -734,14 +880,17 @@ jobs:
           echo "WORKFLOW SUCCESS"
           echo "=========================================="
           echo ""
+
           echo "StatsHub scraping       : PASS"
           echo "StatsHub analysis       : PASS"
           echo "Poisson model           : PASS"
           echo "Model validation        : PASS"
           echo "Prediction recording    : PASS"
-          echo "Settlement engine       : PASS"
+          echo "Invalid cleanup         : PASS"
+          echo "Settlement Engine       : PASS"
           echo "Database validation     : PASS"
           echo "Artifact upload         : PASS"
           echo "Database persistence    : PASS"
+
           echo ""
           echo "SYSTEM READY"
