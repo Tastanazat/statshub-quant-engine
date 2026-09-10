@@ -4,28 +4,24 @@ import re
 from urllib.parse import urljoin
 
 st.set_page_config(
-    page_title="StatsHub API Finder",
-    page_icon="🔎",
+    page_title="StatsHub Gerçek API Bulucu",
+    page_icon="🎯",
     layout="wide"
 )
 
-st.title("🔎 StatsHub Veri Kaynağı Bulucu")
+st.title("🎯 StatsHub Gerçek API Bulucu")
 
 st.info(
-    "Bu araç yalnızca StatsHub sayfasını inceler. "
-    "Amaç, maç istatistiklerinin hangi JavaScript/veri endpointinden geldiğini bulmaktır."
+    "Amaç: StatsHub'ın maç istatistiklerini hangi gerçek veri/API çağrısından "
+    "aldığını bulmak. Başka veri sağlayıcısı kullanılmaz."
 )
 
 url = st.text_input(
-    "StatsHub maç URL'si:",
+    "StatsHub maç URL'si",
     value="https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
 )
 
-if st.button("🚀 VERİ KAYNAĞINI ARA", type="primary"):
-
-    if not url:
-        st.warning("Önce StatsHub URL'si gir.")
-        st.stop()
+if st.button("🔍 GERÇEK API'Yİ BUL", type="primary"):
 
     headers = {
         "User-Agent": (
@@ -34,70 +30,62 @@ if st.button("🚀 VERİ KAYNAĞINI ARA", type="primary"):
             "(KHTML, like Gecko) "
             "Chrome/140.0.0.0 Mobile Safari/537.36"
         ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.9"
     }
 
-    # ==========================================================
-    # 1. SAYFAYI ÇEK
-    # ==========================================================
+    # ---------------------------------------------------------
+    # 1 — ANA SAYFA
+    # ---------------------------------------------------------
 
-    st.subheader("1️⃣ StatsHub sayfası")
+    st.subheader("1️⃣ StatsHub bağlantısı")
 
     try:
-        response = requests.get(
+        r = requests.get(
             url,
             headers=headers,
             timeout=30
         )
 
-        html = response.text
+        html = r.text
 
-        st.success(f"HTTP Status: {response.status_code}")
-        st.write(f"HTML uzunluğu: **{len(html):,} karakter**")
+        st.success(f"HTTP {r.status_code}")
+        st.write(f"HTML: **{len(html):,} karakter**")
 
     except Exception as e:
-        st.error(f"Sayfa alınamadı: {e}")
+        st.error(f"Bağlantı hatası: {e}")
         st.stop()
 
-    # ==========================================================
-    # 2. JAVASCRIPT DOSYALARINI BUL
-    # ==========================================================
+    # ---------------------------------------------------------
+    # 2 — JAVASCRIPT DOSYALARINI BUL
+    # ---------------------------------------------------------
 
     st.subheader("2️⃣ JavaScript dosyaları")
 
     script_urls = []
 
-    patterns = [
+    scripts = re.findall(
         r'<script[^>]+src=["\']([^"\']+)["\']',
-        r'<script[^>]+src=([^ >]+)'
-    ]
+        html,
+        flags=re.I
+    )
 
-    for pattern in patterns:
-        matches = re.findall(
-            pattern,
-            html,
-            flags=re.IGNORECASE
-        )
+    for src in scripts:
 
-        for item in matches:
+        full_url = urljoin(url, src)
 
-            item = item.strip('"\' ')
+        if full_url not in script_urls:
+            script_urls.append(full_url)
 
-            full_url = urljoin(url, item)
+    st.write(
+        f"Bulunan JS dosyası: **{len(script_urls)}**"
+    )
 
-            if full_url not in script_urls:
-                script_urls.append(full_url)
+    # ---------------------------------------------------------
+    # 3 — JS İNDİR
+    # ---------------------------------------------------------
 
-    st.write(f"Bulunan JavaScript dosyası: **{len(script_urls)}**")
-
-    # ==========================================================
-    # 3. JS DOSYALARINI İNDİR
-    # ==========================================================
-
-    st.subheader("3️⃣ JavaScript taraması")
-
-    all_js = []
+    js_files = []
 
     progress = st.progress(0)
 
@@ -105,7 +93,371 @@ if st.button("🚀 VERİ KAYNAĞINI ARA", type="primary"):
 
         try:
 
-            r = requests.get(
+            response = requests.get(
+                js_url,
+                headers=headers,
+                timeout=20
+            )
+
+            if response.status_code == 200:
+
+                js_files.append({
+                    "url": js_url,
+                    "text": response.text
+                })
+
+        except Exception:
+            pass
+
+        progress.progress(
+            (i + 1) / max(len(script_urls), 1)
+        )
+
+    st.success(
+        f"{len(js_files)} JS dosyası indirildi."
+    )
+
+    # ---------------------------------------------------------
+    # 4 — GERÇEK NETWORK ÇAĞRILARINI ARA
+    # ---------------------------------------------------------
+
+    st.subheader("3️⃣ Network çağrıları")
+
+    network_patterns = [
+
+        r'fetch\s*\(',
+
+        r'axios\.[a-zA-Z]+\s*\(',
+
+        r'axios\s*\(',
+
+        r'\.get\s*\(',
+
+        r'\.post\s*\(',
+
+        r'XMLHttpRequest',
+
+        r'\.open\s*\(',
+
+        r'graphql',
+
+        r'baseURL',
+
+        r'apiBase',
+
+        r'apiUrl',
+
+        r'API_URL',
+
+        r'API_BASE'
+    ]
+
+    call_sites = []
+
+    for js in js_files:
+
+        text = js["text"]
+
+        for pattern in network_patterns:
+
+            matches = list(
+                re.finditer(
+                    pattern,
+                    text,
+                    flags=re.I
+                )
+            )
+
+            for match in matches[:100]:
+
+                start = max(
+                    0,
+                    match.start() - 700
+                )
+
+                end = min(
+                    len(text),
+                    match.end() + 1500
+                )
+
+                snippet = text[start:end]
+
+                call_sites.append({
+                    "type": pattern,
+                    "url": js["url"],
+                    "snippet": snippet
+                })
+
+    st.write(
+        f"Network çağrısı bölgesi: **{len(call_sites)}**"
+    )
+
+    # ---------------------------------------------------------
+    # 5 — NETWORK ÇAĞRILARININ İÇİNDEN STRING URL ÇIKAR
+    # ---------------------------------------------------------
+
+    st.subheader("4️⃣ Gerçek endpoint adayları")
+
+    endpoint_candidates = []
+
+    for item in call_sites:
+
+        text = item["snippet"]
+
+        # Tam URL
+        full_urls = re.findall(
+            r'["\'](https?://[^"\']+)["\']',
+            text,
+            flags=re.I
+        )
+
+        # /api/... yolları
+        api_paths = re.findall(
+            r'["\'](\/[^"\']{1,300})["\']',
+            text,
+            flags=re.I
+        )
+
+        for value in full_urls + api_paths:
+
+            value = value.strip()
+
+            # Çöp filtreleri
+            low = value.lower()
+
+            if len(value) < 5:
+                continue
+
+            if any(x in low for x in [
+                ".css",
+                ".woff",
+                ".woff2",
+                ".ttf",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".svg",
+                ".gif",
+                "google",
+                "facebook",
+                "analytics",
+                "sentry"
+            ]):
+                continue
+
+            # Gerçek API ihtimali
+            score = 0
+
+            for word in [
+                "/api/",
+                "graphql",
+                "fixture",
+                "event",
+                "statistics",
+                "lineup",
+                "player",
+                "team",
+                "match",
+                "sport"
+            ]:
+
+                if word in low:
+                    score += 1
+
+            endpoint_candidates.append({
+                "score": score,
+                "value": value,
+                "source": item["url"],
+                "type": item["type"]
+            })
+
+    # Aynı endpointleri temizle
+    unique = {}
+
+    for item in endpoint_candidates:
+
+        key = item["value"]
+
+        if key not in unique:
+
+            unique[key] = item
+
+        elif item["score"] > unique[key]["score"]:
+
+            unique[key] = item
+
+    endpoint_candidates = list(unique.values())
+
+    endpoint_candidates.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    st.write(
+        f"Filtre sonrası aday: **{len(endpoint_candidates)}**"
+    )
+
+    # ---------------------------------------------------------
+    # 6 — EN GÜÇLÜ 50 ADAY
+    # ---------------------------------------------------------
+
+    for i, item in enumerate(
+        endpoint_candidates[:50],
+        1
+    ):
+
+        score = item["score"]
+
+        if score >= 3:
+            icon = "🔥"
+        elif score >= 2:
+            icon = "🟠"
+        else:
+            icon = "⚪"
+
+        with st.expander(
+            f"{icon} #{i} — Skor {score} — {item['value']}"
+        ):
+
+            st.write(
+                "**Kaynak JS:**"
+            )
+
+            st.code(
+                item["source"],
+                language="text"
+            )
+
+            st.write(
+                "**Network çağrısı:**"
+            )
+
+            st.code(
+                item["type"],
+                language="text"
+            )
+
+            st.write(
+                "**Endpoint:**"
+            )
+
+            st.code(
+                item["value"],
+                language="text"
+            )
+
+    # ---------------------------------------------------------
+    # 7 — STATSHUB MAÇ KİMLİKLERİNİ ARA
+    # ---------------------------------------------------------
+
+    st.subheader("5️⃣ Maç kimlikleri")
+
+    ids = {
+        "fixture": None,
+        "eventId": None,
+        "homeTeamId": None,
+        "awayTeamId": None
+    }
+
+    patterns = {
+
+        "fixture": r'"internalId"\s*:\s*(\d+)',
+
+        "eventId": r'eventId["\']?\s*[:=]\s*["\']?(\d+)',
+
+        "homeTeamId": r'homeTeamId["\']?\s*[:=]\s*["\']?(\d+)',
+
+        "awayTeamId": r'awayTeamId["\']?\s*[:=]\s*["\']?(\d+)'
+    }
+
+    for name, pattern in patterns.items():
+
+        match = re.search(
+            pattern,
+            html,
+            flags=re.I
+        )
+
+        if match:
+            ids[name] = match.group(1)
+
+    for name, value in ids.items():
+
+        st.write(
+            f"**{name}:** {value if value else 'Bulunamadı'}"
+        )
+
+    # ---------------------------------------------------------
+    # 8 — ÖNEMLİ KELİMELER
+    # ---------------------------------------------------------
+
+    st.subheader("6️⃣ İstatistik fonksiyonları")
+
+    important = [
+        "showMatchStats",
+        "playerStats",
+        "teamStats",
+        "matchStats",
+        "statistics",
+        "lineups",
+        "shots",
+        "xg",
+        "possession",
+        "corners",
+        "goals",
+        "passes"
+    ]
+
+    found = {}
+
+    for word in important:
+
+        count = 0
+
+        for js in js_files:
+
+            count += len(
+                re.findall(
+                    re.escape(word),
+                    js["text"],
+                    flags=re.I
+                )
+            )
+
+        found[word] = count
+
+    for word, count in found.items():
+
+        st.write(
+            f"**{word}:** {count}"
+        )
+
+    # ---------------------------------------------------------
+    # SONUÇ
+    # ---------------------------------------------------------
+
+    st.divider()
+
+    st.subheader("🎯 Sonuç")
+
+    if endpoint_candidates:
+
+        st.success(
+            "API çağrısı için adaylar bulundu. "
+            "En yüksek skorlu sonuçları inceleyeceğiz."
+        )
+
+    else:
+
+        st.warning(
+            "Statik JS taramasında doğrudan endpoint bulunamadı."
+        )
+
+    st.info(
+        "Bir sonraki aşamada en güçlü adayları otomatik olarak "
+        "HTTP ile test edip JSON döndüren StatsHub endpointini "
+        "bulacağız."
+    )            r = requests.get(
                 js_url,
                 headers=headers,
                 timeout=20
