@@ -34,6 +34,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install playwright requests
           playwright install --with-deps chromium
 
@@ -57,7 +58,29 @@ jobs:
 
 
       # ==========================================
-      # 6. DOSYALARI ARTIFACT OLARAK YÜKLE
+      # 6. MATCH MODEL V2
+      # ==========================================
+
+      - name: Build StatsHub match model
+        run: |
+          python build_match_model.py
+
+
+      # ==========================================
+      # 7. MODEL DOSYASINI KONTROL ET
+      # ==========================================
+
+      - name: Verify match model
+        run: |
+          test -f data/statshub_match_model.json
+          echo "=========================================="
+          echo "MATCH MODEL DOSYASI BULUNDU"
+          echo "=========================================="
+          ls -lh data/statshub_match_model.json
+
+
+      # ==========================================
+      # 8. TÜM VERİLERİ ARTIFACT OLARAK YÜKLE
       # ==========================================
 
       - name: Upload StatsHub data
