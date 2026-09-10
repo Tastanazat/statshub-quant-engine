@@ -7,23 +7,24 @@ permissions:
   contents: write
 
 jobs:
+
   scrape:
 
     runs-on: ubuntu-latest
 
     steps:
 
-      # ==========================================
+      # ==========================================================
       # 1. REPOSITORY
-      # ==========================================
+      # ==========================================================
 
       - name: Repository checkout
         uses: actions/checkout@v4
 
 
-      # ==========================================
+      # ==========================================================
       # 2. PYTHON
-      # ==========================================
+      # ==========================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -31,9 +32,9 @@ jobs:
           python-version: "3.12"
 
 
-      # ==========================================
+      # ==========================================================
       # 3. GEREKLİ KÜTÜPHANELER
-      # ==========================================
+      # ==========================================================
 
       - name: Install dependencies
         run: |
@@ -42,45 +43,45 @@ jobs:
           playwright install --with-deps chromium
 
 
-      # ==========================================
+      # ==========================================================
       # 4. DATABASE OLUŞTUR
-      # ==========================================
+      # ==========================================================
 
       - name: Initialize Quant Engine database
         run: |
           python init_database.py
 
 
-      # ==========================================
+      # ==========================================================
       # 5. STATSHUB VERİ ÇEKME
-      # ==========================================
+      # ==========================================================
 
       - name: Run StatsHub scraper
         run: |
           python scrape_statshub.py
 
 
-      # ==========================================
+      # ==========================================================
       # 6. STATSHUB ANALİZ
-      # ==========================================
+      # ==========================================================
 
       - name: Run StatsHub analysis
         run: |
           python analyze_statshub.py
 
 
-      # ==========================================
+      # ==========================================================
       # 7. MATCH MODEL V2
-      # ==========================================
+      # ==========================================================
 
       - name: Build StatsHub match model
         run: |
           python build_match_model.py
 
 
-      # ==========================================
+      # ==========================================================
       # 8. MODEL DOSYASINI KONTROL ET
-      # ==========================================
+      # ==========================================================
 
       - name: Verify match model
         run: |
@@ -93,18 +94,18 @@ jobs:
           ls -lh data/statshub_match_model.json
 
 
-      # ==========================================
+      # ==========================================================
       # 9. TAHMİNİ DATABASE'E KAYDET
-      # ==========================================
+      # ==========================================================
 
       - name: Record model prediction
         run: |
           python record_prediction.py
 
 
-      # ==========================================
+      # ==========================================================
       # 10. DATABASE KONTROL
-      # ==========================================
+      # ==========================================================
 
       - name: Verify database
         run: |
@@ -117,57 +118,106 @@ jobs:
           ls -lh data/database/quant_engine.db
 
 
-      # ==========================================
-      # 11. ARTIFACT
-      # ==========================================
+      # ==========================================================
+      # 11. DATABASE İÇİNDE PREDICTION KONTROLÜ
+      # ==========================================================
 
-      - name: Upload StatsHub data
-        uses: actions/upload-artifact@v4
-        with:
-          name: statshub-scan
-          path: data/
-          if-no-files-found: error
-
-
-      # ==========================================
-      # 12. DATABASE'İ REPOSITORY'YE KAYDET
-      # ==========================================
-
-      - name: Persist database
+      - name: Verify prediction record
         run: |
+          python - <<'PY'
+          import sqlite3
 
-          git config user.name "github-actions[bot]"
+          database_file = "data/database/quant_engine.db"
 
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          connection = sqlite3.connect(database_file)
+          cursor = connection.cursor()
 
-          git add data/database/quant_engine.db
+          cursor.execute(
+              """
+              SELECT
+                  COUNT(*)
+              FROM predictions
+              """
+          )
 
-          if git diff --cached --quiet; then
+          prediction_count = cursor.fetchone()[0]
 
-            echo "Database değişmedi."
+          cursor.execute(
+              """
+              SELECT
+                  id,
+                  match_id,
+                  model_version,
+                  model_locked
+              FROM predictions
+              ORDER BY id DESC
+              LIMIT 1
+              """
+          )
 
-          else
+          latest_prediction = cursor.fetchone()
 
-            git commit \
-              -m "Update Quant Engine database"
+          connection.close()
 
-            git push
+          print("==========================================")
+          print("PREDICTION DATABASE KONTROLÜ")
+          print("==========================================")
 
-          fi      # 10. ARTIFACT
-      # ==========================================
+          print("")
+          print("Toplam prediction:", prediction_count)
+          print("")
+
+          if latest_prediction is None:
+              raise SystemExit(
+                  "HATA: predictions tablosunda kayıt bulunamadı."
+              )
+
+          print(
+              "Prediction ID:",
+              latest_prediction[0]
+          )
+
+          print(
+              "Match ID:",
+              latest_prediction[1]
+          )
+
+          print(
+              "Model:",
+              latest_prediction[2]
+          )
+
+          print(
+              "Model Locked:",
+              latest_prediction[3]
+          )
+
+          if latest_prediction[3] != 1:
+              raise SystemExit(
+                  "HATA: Model Locked değeri 1 değil."
+              )
+
+          print("")
+          print("PREDICTION DATABASE VALIDATION: PASS")
+          print("")
+          PY
+
+
+      # ==========================================================
+      # 12. TEK ARTIFACT
+      # ==========================================================
 
       - name: Upload StatsHub data
         uses: actions/upload-artifact@v4
         with:
-          name: statshub-scan
+          name: statshub-scan-${{ github.run_id }}
           path: data/
           if-no-files-found: error
 
 
-      # ==========================================
-      # 11. DATABASE'İ REPOSITORY'YE KAYDET
-      # ==========================================
+      # ==========================================================
+      # 13. DATABASE'İ REPOSITORY'YE KAYDET
+      # ==========================================================
 
       - name: Persist database
         run: |
