@@ -5,29 +5,64 @@ on:
 
 jobs:
   scrape:
+
     runs-on: ubuntu-latest
 
     steps:
+
+      # ==========================================
+      # 1. REPOSITORY
+      # ==========================================
+
       - name: Repository checkout
         uses: actions/checkout@v4
+
+
+      # ==========================================
+      # 2. PYTHON
+      # ==========================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+
+      # ==========================================
+      # 3. GEREKLİ KÜTÜPHANELER
+      # ==========================================
+
       - name: Install dependencies
         run: |
-          pip install playwright
-          pip install requests
+          pip install playwright requests
           playwright install --with-deps chromium
 
-      - name: Run StatsHub scanner
+
+      # ==========================================
+      # 4. STATSHUB VERİ ÇEKME
+      # ==========================================
+
+      - name: Run StatsHub scraper
         run: |
           python scrape_statshub.py
+
+
+      # ==========================================
+      # 5. STATSHUB ANALİZ
+      # ==========================================
+
+      - name: Run StatsHub analysis
+        run: |
+          python analyze_statshub.py
+
+
+      # ==========================================
+      # 6. DOSYALARI ARTIFACT OLARAK YÜKLE
+      # ==========================================
 
       - name: Upload StatsHub data
         uses: actions/upload-artifact@v4
         with:
           name: statshub-scan
           path: data/
+          if-no-files-found: error
