@@ -417,7 +417,16 @@ jobs:
 
 
       # =========================================================
-      # 15. VERIFY PREDICTION DATABASE
+      # 15. RUN MODEL CALIBRATION
+      # =========================================================
+
+      - name: Run model calibration
+        run: |
+          python calibrate_model.py
+
+
+      # =========================================================
+      # 16. VERIFY PREDICTION DATABASE
       # =========================================================
 
       - name: Verify prediction database
@@ -504,7 +513,7 @@ jobs:
 
 
       # =========================================================
-      # 16. VERIFY SETTLEMENT DATABASE
+      # 17. VERIFY SETTLEMENT DATABASE
       # =========================================================
 
       - name: Verify settlement database
@@ -642,7 +651,7 @@ jobs:
 
 
       # =========================================================
-      # 17. VERIFY MODEL PERFORMANCE DATABASE
+      # 18. VERIFY MODEL PERFORMANCE DATABASE
       # =========================================================
 
       - name: Verify model performance database
@@ -768,7 +777,117 @@ jobs:
 
 
       # =========================================================
-      # 18. VERIFY OUTPUT FILES
+      # 19. VERIFY CALIBRATION DATABASE
+      # =========================================================
+
+      - name: Verify calibration database
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import os
+
+          db = "data/database/quant_engine.db"
+
+          if not os.path.exists(db):
+              raise SystemExit(
+                  "CALIBRATION DATABASE ERROR: "
+                  "Database bulunamadı."
+              )
+
+          conn = sqlite3.connect(db)
+          conn.row_factory = sqlite3.Row
+
+          cursor = conn.cursor()
+
+          cursor.execute("""
+              SELECT name
+              FROM sqlite_master
+              WHERE type='table'
+              AND name='calibration_history'
+          """)
+
+          if cursor.fetchone() is None:
+              raise SystemExit(
+                  "CALIBRATION DATABASE ERROR: "
+                  "calibration_history tablosu yok."
+              )
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM calibration_history
+          """)
+
+          calibration_count = cursor.fetchone()[0]
+
+          cursor.execute("""
+              SELECT COUNT(*)
+              FROM settlements
+              WHERE settled = 1
+          """)
+
+          settled_count = cursor.fetchone()[0]
+
+          print("")
+          print("==========================================")
+          print("CALIBRATION DATABASE VALIDATION")
+          print("==========================================")
+          print("")
+
+          print(
+              "Settled predictions:",
+              settled_count
+          )
+
+          print(
+              "Calibration history records:",
+              calibration_count
+          )
+
+          if settled_count == 0:
+
+              print("")
+              print(
+                  "No settled predictions yet."
+              )
+
+              print(
+                  "Calibration Engine is waiting."
+              )
+
+              print(
+                  "No calibration is applied."
+              )
+
+          else:
+
+              print("")
+              print(
+                  "Settled data available."
+              )
+
+              print(
+                  "Calibration history:",
+                  calibration_count
+              )
+
+              if calibration_count == 0:
+                  raise SystemExit(
+                      "CALIBRATION DATABASE ERROR: "
+                      "Settlement var fakat calibration history yok."
+                  )
+
+          print("")
+          print(
+              "CALIBRATION DATABASE VALIDATION: PASS"
+          )
+          print("")
+
+          conn.close()
+          PY
+
+
+      # =========================================================
+      # 20. VERIFY OUTPUT FILES
       # =========================================================
 
       - name: Verify output files
@@ -790,6 +909,7 @@ jobs:
           echo "Quant Engine Database    : OK"
           echo "Settlement Engine        : OK"
           echo "Performance Engine       : OK"
+          echo "Calibration Engine       : OK"
 
           echo ""
           echo "Data files:"
@@ -797,7 +917,7 @@ jobs:
 
 
       # =========================================================
-      # 19. UPLOAD ARTIFACT
+      # 21. UPLOAD ARTIFACT
       # =========================================================
 
       - name: Upload StatsHub data
@@ -810,7 +930,7 @@ jobs:
 
 
       # =========================================================
-      # 20. PERSIST DATABASE
+      # 22. PERSIST DATABASE
       # =========================================================
 
       - name: Persist database
@@ -830,7 +950,7 @@ jobs:
 
 
       # =========================================================
-      # 21. FINAL VALIDATION
+      # 23. FINAL VALIDATION
       # =========================================================
 
       - name: Final validation
@@ -850,6 +970,7 @@ jobs:
           echo "Invalid cleanup         : PASS"
           echo "Settlement Engine       : PASS"
           echo "Performance Engine      : PASS"
+          echo "Calibration Engine      : PASS"
           echo "Database validation     : PASS"
           echo "Artifact upload         : PASS"
           echo "Database persistence    : PASS"
