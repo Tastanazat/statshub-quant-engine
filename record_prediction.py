@@ -17,11 +17,12 @@ DATABASE_FILE = os.path.join(
     "quant_engine.db"
 )
 
-# Current StatsHub fixture
+# ============================================================
+# CURRENT STATSHUB FIXTURE
+# ============================================================
+
 FIXTURE_ID = "416477"
 
-# Current fixture status
-# This value is only used when creating the match record.
 MATCH_STATUS = "notstarted"
 
 
@@ -59,7 +60,6 @@ with open(
 # ============================================================
 
 if model.get("source") != "StatsHub":
-
     raise ValueError(
         "Model kaynağı StatsHub değil."
     )
@@ -70,11 +70,14 @@ model_version = model.get(
 )
 
 if not model_version:
-
     raise ValueError(
         "Model version bulunamadı."
     )
 
+
+# ============================================================
+# FIXTURE INFORMATION
+# ============================================================
 
 fixture = model.get(
     "fixture",
@@ -100,20 +103,15 @@ if not away_team:
     )
 
 
+# ============================================================
+# PROBABILITIES
+# ============================================================
+
 probabilities = model.get(
     "probabilities",
     {}
 )
 
-lambdas = model.get(
-    "lambda",
-    {}
-)
-
-
-# ============================================================
-# REQUIRED PROBABILITIES
-# ============================================================
 
 required_probabilities = [
 
@@ -151,8 +149,14 @@ for key in required_probabilities:
 
 
 # ============================================================
-# REQUIRED LAMBDAS
+# LAMBDA
 # ============================================================
+
+lambdas = model.get(
+    "lambda",
+    {}
+)
+
 
 home_lambda = lambdas.get(
     "home"
@@ -178,13 +182,14 @@ if away_lambda is None:
 
 
 # ============================================================
-# VALIDATION
+# MODEL VALIDATION RESULT
 # ============================================================
 
 validation = model.get(
     "validation",
     {}
 )
+
 
 if not validation.get(
     "validation_passed",
@@ -213,7 +218,7 @@ cursor.execute(
 
 
 # ============================================================
-# TIMESTAMP
+# CURRENT UTC TIME
 # ============================================================
 
 now = datetime.now(
@@ -222,16 +227,19 @@ now = datetime.now(
 
 
 # ============================================================
-# MATCH RECORD
+# FIND / CREATE MATCH
 # ============================================================
 
 cursor.execute(
     """
-    SELECT id
+    SELECT
+        id
     FROM matches
     WHERE statshub_fixture_id = ?
     """,
-    (FIXTURE_ID,)
+    (
+        FIXTURE_ID,
+    )
 )
 
 match_row = cursor.fetchone()
@@ -269,18 +277,38 @@ else:
         INSERT INTO matches (
 
             statshub_fixture_id,
+
             home_team,
+
             away_team,
+
             match_date,
+
             status,
+
             final_home_score,
+
             final_away_score,
+
             created_at,
+
             updated_at
 
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (
+
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?
+
+        )
         """,
         (
             FIXTURE_ID,
@@ -304,7 +332,8 @@ else:
 
 cursor.execute(
     """
-    SELECT id
+    SELECT
+        id
     FROM predictions
 
     WHERE
@@ -330,24 +359,54 @@ if existing_prediction:
     print("STATSHUB QUANT ENGINE")
     print("==========================================")
     print("")
-    print("Prediction zaten kayıtlı.")
+
+    print(
+        "Prediction zaten kayıtlı."
+    )
+
     print("")
-    print("Match ID:", match_id)
-    print("Fixture ID:", FIXTURE_ID)
-    print("Model:", model_version)
-    print("Prediction ID:", existing_prediction[0])
+
+    print(
+        "Match ID:",
+        match_id
+    )
+
+    print(
+        "Fixture ID:",
+        FIXTURE_ID
+    )
+
+    print(
+        "Model:",
+        model_version
+    )
+
+    print(
+        "Prediction ID:",
+        existing_prediction[0]
+    )
+
     print("")
-    print("Yeni duplicate prediction oluşturulmadı.")
+
+    print(
+        "Yeni duplicate prediction oluşturulmadı."
+    )
+
     print("")
+
     raise SystemExit(0)
 
 
 # ============================================================
 # MONTE CARLO
 # ============================================================
-
-# Current model is deterministic Poisson.
-# Monte Carlo will be added as a separate validated layer.
+#
+# Şu anki SH-POISSON-002 modelinin ana tahmin motoru
+# deterministik Poisson modelidir.
+#
+# Monte Carlo ayrı ve doğrulanmış bir katman olarak
+# daha sonra eklenecektir.
+#
 
 monte_carlo_simulations = 0
 
@@ -369,28 +428,37 @@ cursor.execute(
         model_locked,
 
         home_win_probability,
+
         draw_probability,
+
         away_win_probability,
 
         over_0_5_probability,
+
         under_0_5_probability,
 
         over_1_5_probability,
+
         under_1_5_probability,
 
         over_2_5_probability,
+
         under_2_5_probability,
 
         over_3_5_probability,
+
         under_3_5_probability,
 
         over_4_5_probability,
+
         under_4_5_probability,
 
         btts_yes_probability,
+
         btts_no_probability,
 
         home_lambda,
+
         away_lambda,
 
         monte_carlo_simulations,
@@ -401,70 +469,125 @@ cursor.execute(
 
     VALUES (
 
-        ?, ?, ?, ?,
+        :match_id,
 
-        ?, ?, ?,
+        :model_version,
 
-        ?, ?,
+        :prediction_time,
 
-        ?, ?,
+        :model_locked,
 
-        ?, ?,
+        :home_win_probability,
 
-        ?, ?,
+        :draw_probability,
 
-        ?, ?,
+        :away_win_probability,
 
-        ?, ?,
+        :over_0_5_probability,
 
-        ?, ?,
+        :under_0_5_probability,
 
-        ?, ?,
+        :over_1_5_probability,
 
-        ?,
+        :under_1_5_probability,
 
-        ?
+        :over_2_5_probability,
+
+        :under_2_5_probability,
+
+        :over_3_5_probability,
+
+        :under_3_5_probability,
+
+        :over_4_5_probability,
+
+        :under_4_5_probability,
+
+        :btts_yes_probability,
+
+        :btts_no_probability,
+
+        :home_lambda,
+
+        :away_lambda,
+
+        :monte_carlo_simulations,
+
+        :created_at
+
     )
     """,
-    (
+    {
 
-        match_id,
+        "match_id":
+            match_id,
 
-        model_version,
+        "model_version":
+            model_version,
 
-        now,
+        "prediction_time":
+            now,
 
-        1,
+        "model_locked":
+            1,
 
-        probabilities["home_win"],
-        probabilities["draw"],
-        probabilities["away_win"],
+        "home_win_probability":
+            probabilities["home_win"],
 
-        probabilities["over_0_5"],
-        probabilities["under_0_5"],
+        "draw_probability":
+            probabilities["draw"],
 
-        probabilities["over_1_5"],
-        probabilities["under_1_5"],
+        "away_win_probability":
+            probabilities["away_win"],
 
-        probabilities["over_2_5"],
-        probabilities["under_2_5"],
+        "over_0_5_probability":
+            probabilities["over_0_5"],
 
-        probabilities["over_3_5"],
-        probabilities["under_3_5"],
+        "under_0_5_probability":
+            probabilities["under_0_5"],
 
-        probabilities["over_4_5"],
-        probabilities["under_4_5"],
+        "over_1_5_probability":
+            probabilities["over_1_5"],
 
-        probabilities["btts_yes"],
-        probabilities["btts_no"],
+        "under_1_5_probability":
+            probabilities["under_1_5"],
 
-        home_lambda,
-        away_lambda,
+        "over_2_5_probability":
+            probabilities["over_2_5"],
 
-        monte_carlo_simulations,
+        "under_2_5_probability":
+            probabilities["under_2_5"],
 
-        now
-    )
+        "over_3_5_probability":
+            probabilities["over_3_5"],
+
+        "under_3_5_probability":
+            probabilities["under_3_5"],
+
+        "over_4_5_probability":
+            probabilities["over_4_5"],
+
+        "under_4_5_probability":
+            probabilities["under_4_5"],
+
+        "btts_yes_probability":
+            probabilities["btts_yes"],
+
+        "btts_no_probability":
+            probabilities["btts_no"],
+
+        "home_lambda":
+            home_lambda,
+
+        "away_lambda":
+            away_lambda,
+
+        "monte_carlo_simulations":
+            monte_carlo_simulations,
+
+        "created_at":
+            now
+    }
 )
 
 
@@ -479,21 +602,51 @@ connection.commit()
 
 
 # ============================================================
-# VALIDATION
+# DATABASE VALIDATION
 # ============================================================
 
 cursor.execute(
     """
     SELECT
+
         id,
+
         match_id,
+
         model_version,
-        model_locked
+
+        prediction_time,
+
+        model_locked,
+
+        home_win_probability,
+
+        draw_probability,
+
+        away_win_probability,
+
+        over_2_5_probability,
+
+        under_2_5_probability,
+
+        btts_yes_probability,
+
+        btts_no_probability,
+
+        home_lambda,
+
+        away_lambda
+
     FROM predictions
+
     WHERE id = ?
+
     """,
-    (prediction_id,)
+    (
+        prediction_id,
+    )
 )
+
 
 saved_prediction = cursor.fetchone()
 
@@ -507,6 +660,10 @@ if saved_prediction is None:
     )
 
 
+# ============================================================
+# CLOSE DATABASE
+# ============================================================
+
 connection.close()
 
 
@@ -515,10 +672,19 @@ connection.close()
 # ============================================================
 
 print("")
+
 print("==========================================")
-print("STATSHUB QUANT ENGINE")
-print("PREDICTION RECORDED")
+
+print(
+    "STATSHUB QUANT ENGINE"
+)
+
+print(
+    "PREDICTION RECORDED"
+)
+
 print("==========================================")
+
 print("")
 
 print(
@@ -573,6 +739,30 @@ print(
 print("")
 
 print(
+    "Over 0.5:",
+    probabilities["over_0_5"]
+)
+
+print(
+    "Under 0.5:",
+    probabilities["under_0_5"]
+)
+
+print("")
+
+print(
+    "Over 1.5:",
+    probabilities["over_1_5"]
+)
+
+print(
+    "Under 1.5:",
+    probabilities["under_1_5"]
+)
+
+print("")
+
+print(
     "Over 2.5:",
     probabilities["over_2_5"]
 )
@@ -581,6 +771,32 @@ print(
     "Under 2.5:",
     probabilities["under_2_5"]
 )
+
+print("")
+
+print(
+    "Over 3.5:",
+    probabilities["over_3_5"]
+)
+
+print(
+    "Under 3.5:",
+    probabilities["under_3_5"]
+)
+
+print("")
+
+print(
+    "Over 4.5:",
+    probabilities["over_4_5"]
+)
+
+print(
+    "Under 4.5:",
+    probabilities["under_4_5"]
+)
+
+print("")
 
 print(
     "BTTS Yes:",
@@ -602,6 +818,13 @@ print(
 print(
     "Away Lambda:",
     away_lambda
+)
+
+print("")
+
+print(
+    "Monte Carlo:",
+    monte_carlo_simulations
 )
 
 print("")
