@@ -23,7 +23,7 @@ jobs:
       # =========================================================
 
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -151,9 +151,6 @@ jobs:
 
       # =========================================================
       # 10. VERIFY MATCH MODEL
-      #
-      # IMPORTANT:
-      # build_match_model.py gerçek JSON yapısına göre kontrol edilir.
       # =========================================================
 
       - name: Verify match model
@@ -310,6 +307,83 @@ jobs:
                   "MATCH MODEL ERROR: "
                   "Eksik probability alanları: "
                   + ", ".join(missing_probabilities)
+              )
+
+          # -----------------------------------------------------
+          # PROBABILITY RANGE CHECK
+          # -----------------------------------------------------
+
+          for key in required_probabilities:
+
+              value = float(probabilities[key])
+
+              if not math.isfinite(value):
+                  raise SystemExit(
+                      f"MATCH MODEL ERROR: "
+                      f"{key} geçersiz."
+                  )
+
+              if value < 0 or value > 1:
+                  raise SystemExit(
+                      f"MATCH MODEL ERROR: "
+                      f"{key} 0-1 aralığında değil."
+                  )
+
+          # -----------------------------------------------------
+          # 1X2 SUM CHECK
+          # -----------------------------------------------------
+
+          one_x_two_sum = (
+              float(probabilities["home_win"])
+              + float(probabilities["draw"])
+              + float(probabilities["away_win"])
+          )
+
+          if abs(one_x_two_sum - 1.0) > 1e-6:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "1X2 olasılıkları toplamı 1 değil."
+              )
+
+          # -----------------------------------------------------
+          # O/U SUM CHECK
+          # -----------------------------------------------------
+
+          for line in [
+              "0_5",
+              "1_5",
+              "2_5",
+              "3_5",
+              "4_5"
+          ]:
+
+              over = float(
+                  probabilities[f"over_{line}"]
+              )
+
+              under = float(
+                  probabilities[f"under_{line}"]
+              )
+
+              if abs((over + under) - 1.0) > 1e-6:
+                  raise SystemExit(
+                      f"MATCH MODEL ERROR: "
+                      f"O/U {line} toplamı 1 değil."
+                  )
+
+          # -----------------------------------------------------
+          # BTTS SUM CHECK
+          # -----------------------------------------------------
+
+          btts_sum = (
+              float(probabilities["btts_yes"])
+              + float(probabilities["btts_no"])
+          )
+
+          if abs(btts_sum - 1.0) > 1e-6:
+              raise SystemExit(
+                  "MATCH MODEL ERROR: "
+                  "BTTS toplamı 1 değil."
               )
 
           # -----------------------------------------------------
@@ -522,7 +596,7 @@ jobs:
       # =========================================================
 
       - name: Upload StatsHub data
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: statshub-scan-${{ github.run_id }}
           path: data/
