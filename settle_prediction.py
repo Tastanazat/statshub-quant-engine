@@ -1,4 +1,3 @@
-
 import json
 import sqlite3
 import requests
@@ -16,7 +15,7 @@ STATSHUB_BASE_URL = "https://www.statshub.com"
 # StatsHub fixture URL ID
 FIXTURE_ID = "416477"
 
-# StatsHub event ID discovered from the fixture
+# EXACT StatsHub event ID
 EVENT_ID = 16938896
 
 # Teams
@@ -30,15 +29,21 @@ TIMEOUT = 30
 
 
 # =========================================================
-# HELPERS
+# TIME
 # =========================================================
 
 def now_utc():
     return datetime.now(timezone.utc).isoformat()
 
 
+# =========================================================
+# SAFE INTEGER
+# =========================================================
+
 def safe_int(value):
+
     try:
+
         if value is None:
             return None
 
@@ -48,14 +53,8 @@ def safe_int(value):
         return int(value)
 
     except (TypeError, ValueError):
+
         return None
-
-
-def normalize_text(value):
-    if value is None:
-        return ""
-
-    return str(value).strip().lower()
 
 
 # =========================================================
@@ -63,6 +62,7 @@ def normalize_text(value):
 # =========================================================
 
 def get_json(url):
+
     print("")
     print("StatsHub request:")
     print(url)
@@ -89,101 +89,181 @@ def get_json(url):
     print("HTTP:", response.status_code)
 
     if response.status_code != 200:
+
+        print(
+            "StatsHub HTTP ERROR:",
+            response.status_code
+        )
+
         return None
 
     try:
+
         return response.json()
 
     except ValueError:
-        print("StatsHub response JSON değil.")
+
+        print(
+            "StatsHub response JSON değil."
+        )
+
         return None
 
 
 # =========================================================
-# RECURSIVE SEARCH
+# RECURSIVE JSON WALKER
 # =========================================================
 
 def walk_objects(value):
-    """
-    JSON içindeki bütün dictionary nesnelerini recursive olarak gezer.
-    """
 
     if isinstance(value, dict):
 
         yield value
 
         for child in value.values():
+
             yield from walk_objects(child)
 
     elif isinstance(value, list):
 
         for child in value:
+
             yield from walk_objects(child)
 
 
 # =========================================================
-# IDENTIFIER MATCH
+# EXACT EVENT ID CHECK
 # =========================================================
 
-def object_matches_fixture(obj):
-    """
-    StatsHub event objesinin bizim fixture/event'e ait olup
-    olmadığını kontrol eder.
-    """
+def has_exact_event_id(obj):
 
-    possible_ids = [
-        obj.get("id"),
-        obj.get("eventId"),
-        obj.get("event_id"),
-        obj.get("fixtureId"),
-        obj.get("fixture_id"),
-        obj.get("internalId"),
-        obj.get("internal_id"),
+    possible_id_fields = [
+        "id",
+        "eventId",
+        "event_id",
+        "fixtureId",
+        "fixture_id",
+        "internalId",
+        "internal_id",
     ]
 
-    for value in possible_ids:
+    for field in possible_id_fields:
+
+        value = obj.get(field)
 
         if value is None:
             continue
 
         if str(value) == str(EVENT_ID):
-            return True
 
-        if str(value) == str(FIXTURE_ID):
             return True
 
     return False
 
 
 # =========================================================
+# STATUS EXTRACTION
+# =========================================================
+
+def extract_status(obj):
+
+    possible_fields = [
+        "status",
+        "eventStatus",
+        "event_status",
+        "matchStatus",
+        "match_status",
+    ]
+
+    for field in possible_fields:
+
+        value = obj.get(field)
+
+        if value is None:
+            continue
+
+        if isinstance(value, str):
+
+            return value.strip().lower()
+
+        if isinstance(value, dict):
+
+            for key in [
+                "type",
+                "name",
+                "description",
+                "code",
+                "status",
+            ]:
+
+                nested = value.get(key)
+
+                if nested is not None:
+
+                    return str(
+                        nested
+                    ).strip().lower()
+
+    return None
+
+
+# =========================================================
 # SCORE EXTRACTION
 # =========================================================
 
-def extract_score_from_object(obj):
-    """
-    StatsHub farklı response yapıları kullanabilir.
-    Bilinen score alanlarını güvenli şekilde arar.
-    """
+def extract_score(obj):
+
+    # -----------------------------------------------------
+    # DIRECT SCORE FIELDS
+    # -----------------------------------------------------
 
     possible_pairs = [
-        ("homeScore", "awayScore"),
-        ("home_score", "away_score"),
-        ("homeGoals", "awayGoals"),
-        ("home_goals", "away_goals"),
-        ("homeScoreCurrent", "awayScoreCurrent"),
-        ("home_score_current", "away_score_current"),
+
+        (
+            "homeScore",
+            "awayScore"
+        ),
+
+        (
+            "home_score",
+            "away_score"
+        ),
+
+        (
+            "homeGoals",
+            "awayGoals"
+        ),
+
+        (
+            "home_goals",
+            "away_goals"
+        ),
+
+        (
+            "homeScoreCurrent",
+            "awayScoreCurrent"
+        ),
+
+        (
+            "home_score_current",
+            "away_score_current"
+        ),
     ]
 
     for home_key, away_key in possible_pairs:
 
-        if home_key in obj and away_key in obj:
+        if (
+            home_key in obj
+            and away_key in obj
+        ):
 
-            home_value = obj.get(home_key)
-            away_value = obj.get(away_key)
+            home_score = safe_int(
+                obj.get(home_key)
+            )
 
-            # Score bazen doğrudan sayı olur
-            home_score = safe_int(home_value)
-            away_score = safe_int(away_value)
+            away_score = safe_int(
+                obj.get(away_key)
+            )
 
             if (
                 home_score is not None
@@ -191,46 +271,21 @@ def extract_score_from_object(obj):
                 and home_score >= 0
                 and away_score >= 0
             ):
-                return home_score, away_score
 
-            # Score bazen dict olur
-            if isinstance(home_value, dict):
-                for key in [
-                    "current",
-                    "display",
-                    "normaltime",
-                    "normaltime",
-                    "period1",
-                    "value",
-                ]:
-                    if key in home_value:
-                        candidate_home = safe_int(
-                            home_value.get(key)
-                        )
+                return (
+                    home_score,
+                    away_score
+                )
 
-                        candidate_away = None
+    # -----------------------------------------------------
+    # SCORE OBJECT
+    # -----------------------------------------------------
 
-                        if isinstance(away_value, dict):
-                            candidate_away = safe_int(
-                                away_value.get(key)
-                            )
-
-                        if (
-                            candidate_home is not None
-                            and candidate_away is not None
-                            and candidate_home >= 0
-                            and candidate_away >= 0
-                        ):
-                            return (
-                                candidate_home,
-                                candidate_away,
-                            )
-
-    # Nested "score" object
     score = obj.get("score")
 
     if isinstance(score, dict):
 
+        # score.home / score.away
         home = score.get("home")
         away = score.get("away")
 
@@ -243,20 +298,33 @@ def extract_score_from_object(obj):
             and home_score >= 0
             and away_score >= 0
         ):
-            return home_score, away_score
 
-        # score.home.current / score.away.current
-        if isinstance(home, dict) and isinstance(away, dict):
+            return (
+                home_score,
+                away_score
+            )
+
+        # Nested score objects
+        if (
+            isinstance(home, dict)
+            and isinstance(away, dict)
+        ):
 
             for key in [
                 "current",
                 "display",
                 "normaltime",
                 "value",
+                "period1",
             ]:
 
-                home_score = safe_int(home.get(key))
-                away_score = safe_int(away.get(key))
+                home_score = safe_int(
+                    home.get(key)
+                )
+
+                away_score = safe_int(
+                    away.get(key)
+                )
 
                 if (
                     home_score is not None
@@ -264,209 +332,364 @@ def extract_score_from_object(obj):
                     and home_score >= 0
                     and away_score >= 0
                 ):
-                    return home_score, away_score
+
+                    return (
+                        home_score,
+                        away_score
+                    )
 
     return None
 
 
 # =========================================================
-# TEAM MATCH CHECK
+# TEAM VALIDATION
 # =========================================================
 
-def object_has_our_teams(obj):
+def validate_teams(obj):
 
-    text_parts = []
+    home_id = None
+    away_id = None
 
-    for key in [
-        "homeTeamName",
-        "awayTeamName",
-        "home_team_name",
-        "away_team_name",
-        "homeTeam",
-        "awayTeam",
-    ]:
+    # -----------------------------------------------------
+    # DIRECT TEAM IDs
+    # -----------------------------------------------------
 
-        value = obj.get(key)
+    possible_home_id_fields = [
+        "homeTeamId",
+        "home_team_id",
+    ]
 
-        if isinstance(value, dict):
+    possible_away_id_fields = [
+        "awayTeamId",
+        "away_team_id",
+    ]
 
-            text_parts.append(
-                str(value.get("name", ""))
+    for field in possible_home_id_fields:
+
+        if obj.get(field) is not None:
+
+            home_id = safe_int(
+                obj.get(field)
             )
 
-            team_id = value.get("id")
+            break
 
-            if str(team_id) in [
-                str(HOME_TEAM_ID),
-                str(AWAY_TEAM_ID),
-            ]:
-                return True
+    for field in possible_away_id_fields:
 
-        elif value is not None:
+        if obj.get(field) is not None:
 
-            text_parts.append(str(value))
+            away_id = safe_int(
+                obj.get(field)
+            )
 
-    combined = " ".join(text_parts).lower()
+            break
 
-    home_ok = (
-        "psv" in combined
-        or "eindhoven" in combined
-    )
+    # -----------------------------------------------------
+    # NESTED TEAM OBJECTS
+    # -----------------------------------------------------
 
-    away_ok = (
-        "shakhtar" in combined
-        or "donetsk" in combined
-    )
+    home_team = obj.get("homeTeam")
 
-    return home_ok and away_ok
+    away_team = obj.get("awayTeam")
+
+    if isinstance(home_team, dict):
+
+        if home_id is None:
+
+            home_id = safe_int(
+                home_team.get("id")
+            )
+
+    if isinstance(away_team, dict):
+
+        if away_id is None:
+
+            away_id = safe_int(
+                away_team.get("id")
+            )
+
+    # -----------------------------------------------------
+    # EXACT TEAM ID VALIDATION
+    # -----------------------------------------------------
+
+    if (
+        home_id == HOME_TEAM_ID
+        and away_id == AWAY_TEAM_ID
+    ):
+
+        return True
+
+    return False
 
 
 # =========================================================
-# FIND EVENT
+# FIND EXACT EVENT
 # =========================================================
 
-def find_event_in_data(data):
+def find_exact_event(data):
 
     candidates = []
 
     for obj in walk_objects(data):
 
         if not isinstance(obj, dict):
-            continue
-
-        identifier_match = object_matches_fixture(obj)
-
-        team_match = object_has_our_teams(obj)
-
-        score = extract_score_from_object(obj)
-
-        if identifier_match or team_match:
-
-            candidates.append(
-                {
-                    "object": obj,
-                    "identifier_match": identifier_match,
-                    "team_match": team_match,
-                    "score": score,
-                }
-            )
-
-    # Öncelik:
-    # 1. fixture/event ID eşleşmesi + skor
-    # 2. takım eşleşmesi + skor
-    # 3. ID eşleşmesi
-
-    for candidate in candidates:
-
-        if (
-            candidate["identifier_match"]
-            and candidate["score"] is not None
-        ):
-            return candidate["object"], candidate["score"]
-
-    for candidate in candidates:
-
-        if (
-            candidate["team_match"]
-            and candidate["score"] is not None
-        ):
-            return candidate["object"], candidate["score"]
-
-    for candidate in candidates:
-
-        if candidate["identifier_match"]:
-            return candidate["object"], None
-
-    return None, None
-
-
-# =========================================================
-# FETCH STATSHUB RESULT
-# =========================================================
-
-def fetch_final_result():
-
-    urls = [
-
-        # -----------------------------------------------------
-        # 1. PSV finished events
-        # -----------------------------------------------------
-
-        (
-            f"{STATSHUB_BASE_URL}"
-            f"/api/team/{HOME_TEAM_ID}"
-            f"/events?status=finished&limit=50"
-        ),
-
-        # -----------------------------------------------------
-        # 2. Shakhtar finished events
-        # -----------------------------------------------------
-
-        (
-            f"{STATSHUB_BASE_URL}"
-            f"/api/team/{AWAY_TEAM_ID}"
-            f"/events?status=finished&limit=50"
-        ),
-
-        # -----------------------------------------------------
-        # 3. Tournament events
-        # -----------------------------------------------------
-
-        (
-            f"{STATSHUB_BASE_URL}"
-            f"/api/tournament/1988/96518/events"
-        ),
-    ]
-
-    for url in urls:
-
-        data = get_json(url)
-
-        if data is None:
-            continue
-
-        event, score = find_event_in_data(data)
-
-        if event is None:
-            continue
-
-        print("")
-        print("StatsHub fixture bulundu.")
-
-        if score is None:
-
-            print(
-                "Fixture bulundu fakat final skor "
-                "henüz bulunamadı."
-            )
 
             continue
 
-        home_score, away_score = score
+        # -------------------------------------------------
+        # ABSOLUTE REQUIREMENT #1
+        # -------------------------------------------------
 
-        print("")
-        print("==========================================")
-        print("STATSHUB FINAL RESULT FOUND")
-        print("==========================================")
-        print("")
-        print(
-            f"{HOME_TEAM_NAME} {home_score} - "
-            f"{away_score} {AWAY_TEAM_NAME}"
+        if not has_exact_event_id(obj):
+
+            continue
+
+        # -------------------------------------------------
+        # ABSOLUTE REQUIREMENT #2
+        # -------------------------------------------------
+
+        team_match = validate_teams(obj)
+
+        # -------------------------------------------------
+        # SCORE
+        # -------------------------------------------------
+
+        score = extract_score(obj)
+
+        # -------------------------------------------------
+        # STATUS
+        # -------------------------------------------------
+
+        status = extract_status(obj)
+
+        candidates.append(
+            {
+                "object": obj,
+                "team_match": team_match,
+                "score": score,
+                "status": status,
+            }
         )
-        print("")
 
-        return {
-            "status": "finished",
-            "home_score": home_score,
-            "away_score": away_score,
-            "event": event,
-        }
+    print("")
+    print(
+        "Exact EVENT_ID candidates:",
+        len(candidates)
+    )
+
+    # -----------------------------------------------------
+    # REQUIRE EXACT EVENT + EXACT TEAMS
+    # -----------------------------------------------------
+
+    for candidate in candidates:
+
+        if candidate["team_match"]:
+
+            return candidate
+
+    # -----------------------------------------------------
+    # EVENT FOUND BUT TEAM STRUCTURE DIFFERENT
+    # -----------------------------------------------------
+
+    if candidates:
+
+        print(
+            "EVENT_ID bulundu fakat "
+            "home/away team ID doğrulanamadı."
+        )
+
+        return candidates[0]
 
     return None
 
 
 # =========================================================
-# SETTLEMENT CALCULATIONS
+# FETCH EXACT STATSHUB EVENT
+# =========================================================
+
+def fetch_final_result():
+
+    # -----------------------------------------------------
+    # PRIMARY SOURCE
+    #
+    # Exact tournament event list.
+    # We DO NOT accept a random team event.
+    # -----------------------------------------------------
+
+    url = (
+        f"{STATSHUB_BASE_URL}"
+        f"/api/tournament/1988/96518/events"
+    )
+
+    data = get_json(url)
+
+    if data is None:
+
+        return None
+
+    candidate = find_exact_event(data)
+
+    if candidate is None:
+
+        print("")
+        print(
+            "EXACT EVENT NOT FOUND."
+        )
+
+        return None
+
+    event = candidate["object"]
+
+    score = candidate["score"]
+
+    status = candidate["status"]
+
+    print("")
+    print("==========================================")
+    print("EXACT STATSHUB EVENT FOUND")
+    print("==========================================")
+    print("")
+    print(
+        "Required Event ID:",
+        EVENT_ID
+    )
+    print(
+        "Required Fixture ID:",
+        FIXTURE_ID
+    )
+    print(
+        "Status:",
+        status
+    )
+    print(
+        "Team IDs validated:",
+        candidate["team_match"]
+    )
+
+    # -----------------------------------------------------
+    # EVENT ID SAFETY
+    # -----------------------------------------------------
+
+    if not has_exact_event_id(event):
+
+        print(
+            "SECURITY ERROR: Exact Event ID "
+            "verification failed."
+        )
+
+        return None
+
+    # -----------------------------------------------------
+    # TEAM SAFETY
+    # -----------------------------------------------------
+
+    if not candidate["team_match"]:
+
+        print(
+            "SECURITY ERROR: Home/Away team IDs "
+            "do not match target fixture."
+        )
+
+        return None
+
+    # -----------------------------------------------------
+    # STATUS SAFETY
+    # -----------------------------------------------------
+
+    if status is None:
+
+        print(
+            "StatsHub event status bulunamadı."
+        )
+
+        print(
+            "Settlement yapılmayacak."
+        )
+
+        return None
+
+    finished_statuses = {
+        "finished",
+        "ended",
+        "ft",
+        "afterpenalties",
+        "aet",
+        "fulltime",
+        "full time",
+    }
+
+    if status not in finished_statuses:
+
+        print("")
+        print(
+            "MATCH NOT FINISHED."
+        )
+        print(
+            "StatsHub status:",
+            status
+        )
+        print(
+            "Settlement yapılmayacak."
+        )
+
+        return None
+
+    # -----------------------------------------------------
+    # SCORE SAFETY
+    # -----------------------------------------------------
+
+    if score is None:
+
+        print(
+            "StatsHub final score bulunamadı."
+        )
+
+        print(
+            "Settlement yapılmayacak."
+        )
+
+        return None
+
+    home_score, away_score = score
+
+    if (
+        home_score < 0
+        or away_score < 0
+    ):
+
+        print(
+            "Geçersiz skor."
+        )
+
+        return None
+
+    # -----------------------------------------------------
+    # FINAL RESULT
+    # -----------------------------------------------------
+
+    print("")
+    print(
+        "STATSHUB FINAL RESULT CONFIRMED"
+    )
+    print("")
+    print(
+        f"{HOME_TEAM_NAME} "
+        f"{home_score} - "
+        f"{away_score} "
+        f"{AWAY_TEAM_NAME}"
+    )
+    print("")
+
+    return {
+        "status": "finished",
+        "home_score": home_score,
+        "away_score": away_score,
+        "event": event,
+    }
+
+
+# =========================================================
+# SETTLEMENT CALCULATION
 # =========================================================
 
 def calculate_settlement(
@@ -474,7 +697,10 @@ def calculate_settlement(
     away_score
 ):
 
-    total_goals = home_score + away_score
+    total_goals = (
+        home_score
+        + away_score
+    )
 
     # -----------------------------------------------------
     # 1X2
@@ -496,7 +722,10 @@ def calculate_settlement(
     # BTTS
     # -----------------------------------------------------
 
-    if home_score > 0 and away_score > 0:
+    if (
+        home_score > 0
+        and away_score > 0
+    ):
 
         btts_result = "YES"
 
@@ -505,7 +734,7 @@ def calculate_settlement(
         btts_result = "NO"
 
     # -----------------------------------------------------
-    # OVER / UNDER
+    # O/U
     # -----------------------------------------------------
 
     results = {}
@@ -518,26 +747,29 @@ def calculate_settlement(
         4.5,
     ]:
 
-        line_key = str(line).replace(".", "_")
+        key = str(line).replace(
+            ".",
+            "_"
+        )
 
         if total_goals > line:
 
             results[
-                f"over_{line_key}_result"
+                f"over_{key}_result"
             ] = "WIN"
 
             results[
-                f"under_{line_key}_result"
+                f"under_{key}_result"
             ] = "LOSS"
 
         else:
 
             results[
-                f"over_{line_key}_result"
+                f"over_{key}_result"
             ] = "LOSS"
 
             results[
-                f"under_{line_key}_result"
+                f"under_{key}_result"
             ] = "WIN"
 
     return {
@@ -549,7 +781,7 @@ def calculate_settlement(
 
 
 # =========================================================
-# DATABASE
+# DATABASE SETTLEMENT
 # =========================================================
 
 def settle_database(
@@ -566,7 +798,7 @@ def settle_database(
     cursor = conn.cursor()
 
     # -----------------------------------------------------
-    # FIND MATCH
+    # FIND EXACT MATCH
     # -----------------------------------------------------
 
     cursor.execute(
@@ -594,16 +826,39 @@ def settle_database(
 
         raise SystemExit(
             "SETTLEMENT ERROR: "
-            "Fixture için matches kaydı bulunamadı."
+            "Fixture matches tablosunda bulunamadı."
         )
 
     match_id = match["id"]
 
     print("")
-    print("Match ID:", match_id)
+    print(
+        "Database Match ID:",
+        match_id
+    )
 
     # -----------------------------------------------------
-    # UPDATE MATCH RESULT
+    # DATABASE TEAM SAFETY
+    # -----------------------------------------------------
+
+    if (
+        str(match["home_team"]).lower()
+        != HOME_TEAM_NAME.lower()
+        or
+        str(match["away_team"]).lower()
+        != AWAY_TEAM_NAME.lower()
+    ):
+
+        conn.close()
+
+        raise SystemExit(
+            "SETTLEMENT SECURITY ERROR: "
+            "Database home/away takımları hedef "
+            "fixture ile eşleşmiyor."
+        )
+
+    # -----------------------------------------------------
+    # UPDATE MATCH
     # -----------------------------------------------------
 
     cursor.execute(
@@ -646,7 +901,7 @@ def settle_database(
 
     if not predictions:
 
-        conn.commit()
+        conn.rollback()
         conn.close()
 
         raise SystemExit(
@@ -654,14 +909,13 @@ def settle_database(
             "Bu maç için prediction bulunamadı."
         )
 
-    print("")
     print(
         "Prediction count:",
         len(predictions)
     )
 
     # -----------------------------------------------------
-    # CALCULATE RESULT
+    # CALCULATE
     # -----------------------------------------------------
 
     settlement = calculate_settlement(
@@ -669,22 +923,24 @@ def settle_database(
         away_score,
     )
 
-    # -----------------------------------------------------
-    # EACH PREDICTION
-    # -----------------------------------------------------
-
     created_count = 0
     skipped_count = 0
+
+    # -----------------------------------------------------
+    # SETTLE EACH PREDICTION
+    # -----------------------------------------------------
 
     for prediction in predictions:
 
         prediction_id = prediction["id"]
 
         # -------------------------------------------------
-        # MODEL LOCK CHECK
+        # MODEL LOCK MUST REMAIN
         # -------------------------------------------------
 
-        if int(prediction["model_locked"]) != 1:
+        if int(
+            prediction["model_locked"]
+        ) != 1:
 
             conn.rollback()
             conn.close()
@@ -723,7 +979,7 @@ def settle_database(
             continue
 
         # -------------------------------------------------
-        # INSERT SETTLEMENT
+        # INSERT
         # -------------------------------------------------
 
         cursor.execute(
@@ -764,9 +1020,15 @@ def settle_database(
                 "settlement_time": now_utc(),
                 "final_home_score": home_score,
                 "final_away_score": away_score,
-                "result_1x2": settlement["result_1x2"],
-                "total_goals": settlement["total_goals"],
-                "btts_result": settlement["btts_result"],
+                "result_1x2": settlement[
+                    "result_1x2"
+                ],
+                "total_goals": settlement[
+                    "total_goals"
+                ],
+                "btts_result": settlement[
+                    "btts_result"
+                ],
                 "over_0_5_result": settlement[
                     "over_0_5_result"
                 ],
@@ -800,7 +1062,7 @@ def settle_database(
     conn.commit()
 
     # -----------------------------------------------------
-    # VERIFY
+    # VERIFY SETTLEMENT
     # -----------------------------------------------------
 
     cursor.execute(
@@ -816,7 +1078,61 @@ def settle_database(
 
     settlement_count = cursor.fetchone()[0]
 
+    # -----------------------------------------------------
+    # VERIFY MATCH
+    # -----------------------------------------------------
+
+    cursor.execute(
+        """
+        SELECT
+            status,
+            final_home_score,
+            final_away_score
+        FROM matches
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (match_id,),
+    )
+
+    verified_match = cursor.fetchone()
+
     conn.close()
+
+    # -----------------------------------------------------
+    # FINAL VALIDATION
+    # -----------------------------------------------------
+
+    if verified_match is None:
+
+        raise SystemExit(
+            "SETTLEMENT VALIDATION ERROR: "
+            "Match verification başarısız."
+        )
+
+    if verified_match["status"] != "finished":
+
+        raise SystemExit(
+            "SETTLEMENT VALIDATION ERROR: "
+            "Match status finished değil."
+        )
+
+    if (
+        int(
+            verified_match["final_home_score"]
+        )
+        != home_score
+        or
+        int(
+            verified_match["final_away_score"]
+        )
+        != away_score
+    ):
+
+        raise SystemExit(
+            "SETTLEMENT VALIDATION ERROR: "
+            "Database final skor doğrulaması başarısız."
+        )
 
     # -----------------------------------------------------
     # SUCCESS
@@ -828,64 +1144,85 @@ def settle_database(
     print("VALIDATION: PASS")
     print("==========================================")
     print("")
+
     print(
-        f"{HOME_TEAM_NAME} {home_score} - "
-        f"{away_score} {AWAY_TEAM_NAME}"
+        f"{HOME_TEAM_NAME} "
+        f"{home_score} - "
+        f"{away_score} "
+        f"{AWAY_TEAM_NAME}"
     )
+
     print("")
+
     print(
         "1X2 Result:",
         settlement["result_1x2"]
     )
+
     print(
         "Total Goals:",
         settlement["total_goals"]
     )
+
     print(
         "BTTS:",
         settlement["btts_result"]
     )
+
     print("")
+
     print(
         "Over 0.5:",
         settlement["over_0_5_result"]
     )
+
     print(
         "Over 1.5:",
         settlement["over_1_5_result"]
     )
+
     print(
         "Over 2.5:",
         settlement["over_2_5_result"]
     )
+
     print(
         "Over 3.5:",
         settlement["over_3_5_result"]
     )
+
     print(
         "Over 4.5:",
         settlement["over_4_5_result"]
     )
+
     print("")
+
     print(
         "New Settlements:",
         created_count
     )
+
     print(
         "Skipped Existing:",
         skipped_count
     )
+
     print(
         "Total Settlements:",
         settlement_count
     )
+
     print("")
+
     print(
         "MODEL LOCK: PRESERVED"
     )
+
     print(
         "Prediction probabilities: NOT MODIFIED"
     )
+
     print("")
 
 
@@ -901,63 +1238,65 @@ def main():
     print("==========================================")
     print("")
 
-    print("Source: StatsHub")
-    print("Fixture ID:", FIXTURE_ID)
-    print("Event ID:", EVENT_ID)
+    print(
+        "Source: StatsHub"
+    )
+
+    print(
+        "Fixture ID:",
+        FIXTURE_ID
+    )
+
+    print(
+        "Event ID:",
+        EVENT_ID
+    )
+
     print(
         "Match:",
         HOME_TEAM_NAME,
         "vs",
-        AWAY_TEAM_NAME,
+        AWAY_TEAM_NAME
     )
 
     # -----------------------------------------------------
-    # FETCH RESULT
+    # FETCH EXACT RESULT
     # -----------------------------------------------------
 
     result = fetch_final_result()
 
     # -----------------------------------------------------
-    # NO FINAL RESULT
+    # NO VALID FINAL RESULT
     # -----------------------------------------------------
 
     if result is None:
 
         print("")
         print("==========================================")
-        print("MATCH NOT FINISHED / RESULT NOT AVAILABLE")
+        print("NO VALID FINAL RESULT")
         print("==========================================")
         print("")
-        print(
-            "StatsHub'da final skor bulunamadı."
-        )
         print(
             "Settlement yapılmadı."
         )
         print(
-            "Database değiştirilmedi."
+            "Prediction değiştirilmedi."
         )
         print("")
 
         return
 
     # -----------------------------------------------------
-    # FINAL SCORE
+    # SCORE
     # -----------------------------------------------------
 
-    home_score = result["home_score"]
-    away_score = result["away_score"]
+    home_score = result[
+        "home_score"
+    ]
 
-    # -----------------------------------------------------
-    # SAFETY
-    # -----------------------------------------------------
-
-    if home_score < 0 or away_score < 0:
-
-        raise SystemExit(
-            "SETTLEMENT ERROR: "
-            "Geçersiz final skor."
-        )
+    away_score = result[
+        "away_score"
+    ]
 
     # -----------------------------------------------------
     # SETTLE
@@ -969,5 +1308,10 @@ def main():
     )
 
 
+# =========================================================
+# ENTRY POINT
+# =========================================================
+
 if __name__ == "__main__":
+
     main()
