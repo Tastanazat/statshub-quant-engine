@@ -5,25 +5,25 @@ from urllib.parse import urljoin
 
 
 # ============================================================
-# SAYFA AYARLARI
+# SAYFA
 # ============================================================
 
 st.set_page_config(
-    page_title="StatsHub Endpoint Discovery",
-    page_icon="🔎",
+    page_title="StatsHub JS API Discovery",
+    page_icon="🔬",
     layout="wide"
 )
 
-st.title("🔎 StatsHub Endpoint Discovery")
+st.title("🔬 StatsHub JavaScript API Discovery")
 
 st.write(
-    "Bu araç StatsHub sayfasının kullandığı API, JSON ve veri "
-    "adreslerini otomatik olarak araştırır."
+    "StatsHub sayfasının JavaScript dosyalarını tarar ve "
+    "maç verisinin çağrıldığı olası endpointleri bulur."
 )
 
 st.info(
-    "⚠️ Bu aşamada tahmin yapılmaz. Amaç gerçek StatsHub "
-    "verisinin nereden geldiğini bulmaktır."
+    "⚠️ Bu aşamada tahmin yapılmaz. "
+    "Amaç yalnızca StatsHub veri kaynağını bulmaktır."
 )
 
 
@@ -42,45 +42,149 @@ url = st.text_input(
 
 
 # ============================================================
-# API / ENDPOINT TARAMA
+# HTTP AYARLARI
+# ============================================================
+
+headers = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/131.0 Safari/537.36"
+    ),
+    "Accept": "*/*",
+    "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"
+}
+
+
+# ============================================================
+# SCRIPT URL'LERİNİ BUL
+# ============================================================
+
+def find_script_urls(html, page_url):
+
+    results = set()
+
+    pattern = re.compile(
+        r'<script[^>]+src=["\']([^"\']+)["\']',
+        re.I
+    )
+
+    matches = pattern.findall(html)
+
+    for src in matches:
+
+        full_url = urljoin(
+            page_url,
+            src
+        )
+
+        results.add(full_url)
+
+    return sorted(results)
+
+
+# ============================================================
+# JAVASCRIPT İÇERİĞİNDE API İPUÇLARINI BUL
+# ============================================================
+
+def find_api_candidates(js):
+
+    results = set()
+
+    patterns = [
+
+        # /api/...
+        r'["\']([^"\']*/api/[^"\']+)["\']',
+
+        # absolute https URLs
+        r'["\'](https?://[^"\']+)["\']',
+
+        # fetch("...")
+        r'fetch\s*\(\s*["\']([^"\']+)["\']',
+
+        # axios.get("...")
+        r'axios\.(?:get|post|put|delete)\s*\(\s*["\']([^"\']+)["\']',
+
+        # graphql
+        r'["\']([^"\']*graphql[^"\']*)["\']',
+
+        # fixture paths
+        r'["\']([^"\']*fixture[^"\']*)["\']',
+
+        # statistics
+        r'["\']([^"\']*(?:statistics|statistic)[^"\']*)["\']',
+
+        # lineup
+        r'["\']([^"\']*lineup[^"\']*)["\']',
+
+        # player
+        r'["\']([^"\']*player[^"\']*)["\']',
+
+        # events
+        r'["\']([^"\']*(?:events|event)[^"\']*)["\']',
+
+        # shots
+        r'["\']([^"\']*shots[^"\']*)["\']',
+
+        # xg
+        r'["\']([^"\']*(?:xg|expected-goals)[^"\']*)["\']'
+    ]
+
+
+    for pattern in patterns:
+
+        try:
+
+            matches = re.findall(
+                pattern,
+                js,
+                re.I
+            )
+
+            for match in matches:
+
+                if isinstance(match, tuple):
+
+                    for value in match:
+
+                        if value:
+                            results.add(value)
+
+                else:
+
+                    results.add(match)
+
+        except Exception:
+            pass
+
+
+    return results
+
+
+# ============================================================
+# ANA İŞLEM
 # ============================================================
 
 if st.button(
-    "🔎 API / VERİ ENDPOINTLERİNİ BUL",
+    "🚀 JAVASCRIPT DOSYALARINI TARA",
     type="primary"
 ):
 
     if not url:
 
-        st.warning("Önce StatsHub URL'si gir.")
+        st.warning(
+            "StatsHub URL'si girmen gerekiyor."
+        )
+
         st.stop()
+
 
     try:
 
-        headers = {
-
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/131.0 Safari/537.36"
-            ),
-
-            "Accept": (
-                "text/html,"
-                "application/xhtml+xml,"
-                "application/xml;q=0.9,"
-                "*/*;q=0.8"
-            ),
-
-            "Accept-Language":
-                "tr-TR,tr;q=0.9,en;q=0.8"
-        }
-
-
-        # ====================================================
-        # SAYFAYI ÇEK
-        # ====================================================
+        # ----------------------------------------------------
+        # SAYFAYI İNDİR
+        # ----------------------------------------------------
 
         with st.spinner(
             "StatsHub sayfası indiriliyor..."
@@ -92,398 +196,437 @@ if st.button(
                 timeout=30
             )
 
+
         st.success(
             f"HTTP {response.status_code}"
         )
 
+
         html = response.text
 
+
         st.write(
-            f"📄 HTML boyutu: "
+            f"📄 HTML: "
             f"**{len(html):,} karakter**"
         )
 
 
-        # ====================================================
-        # 1 — TÜM HTTP/HTTPS URL'LERİ
-        # ====================================================
+        # ----------------------------------------------------
+        # SCRIPT DOSYALARINI BUL
+        # ----------------------------------------------------
 
-        absolute_urls = re.findall(
-            r'https?://[^\s"\'<>\\]+',
-            html
+        script_urls = find_script_urls(
+            html,
+            url
         )
 
 
-        # Temizle
-        cleaned_urls = set()
+        st.divider()
 
-        for item in absolute_urls:
+        st.subheader(
+            "📜 JavaScript Dosyaları"
+        )
 
-            item = item.rstrip(
-                ".,);]}>'\""
+
+        st.metric(
+            "Bulunan JS dosyası",
+            len(script_urls)
+        )
+
+
+        if not script_urls:
+
+            st.error(
+                "JavaScript dosyası bulunamadı."
             )
 
-            if len(item) > 10:
-                cleaned_urls.add(item)
+            st.stop()
 
 
-        # ====================================================
-        # 2 — /api/... ADRESLERİ
-        # ====================================================
+        # ----------------------------------------------------
+        # JS LİSTESİ
+        # ----------------------------------------------------
 
-        api_paths = re.findall(
-            r'["\'](\/api\/[^"\']+)["\']',
-            html,
-            re.I
+        for i, js_url in enumerate(
+            script_urls,
+            1
+        ):
+
+            st.code(
+                f"{i}. {js_url}",
+                language="text"
+            )
+
+
+        # ----------------------------------------------------
+        # JS DOSYALARINI İNDİR
+        # ----------------------------------------------------
+
+        st.divider()
+
+        st.subheader(
+            "⬇️ JavaScript Analizi"
         )
 
 
-        # ====================================================
-        # 3 — JSON ADRESLERİ
-        # ====================================================
+        all_candidates = set()
 
-        json_paths = re.findall(
-            r'["\']([^"\']+\.json(?:\?[^"\']*)?)["\']',
-            html,
-            re.I
+        downloaded = 0
+
+
+        progress = st.progress(0)
+
+
+        for index, js_url in enumerate(
+            script_urls
+        ):
+
+            try:
+
+                js_response = requests.get(
+                    js_url,
+                    headers=headers,
+                    timeout=20
+                )
+
+
+                if js_response.status_code != 200:
+
+                    continue
+
+
+                js = js_response.text
+
+                downloaded += 1
+
+
+                candidates = find_api_candidates(
+                    js
+                )
+
+
+                for candidate in candidates:
+
+                    all_candidates.add(
+                        (
+                            js_url,
+                            candidate
+                        )
+                    )
+
+
+            except Exception:
+
+                pass
+
+
+            progress.progress(
+                (index + 1)
+                / len(script_urls)
+            )
+
+
+        # ----------------------------------------------------
+        # SONUÇ
+        # ----------------------------------------------------
+
+        st.divider()
+
+        st.subheader(
+            "🎯 Bulunan Olası Veri Endpointleri"
         )
 
 
-        # ====================================================
-        # 4 — API KELİMESİ GEÇEN ADRESLER
-        # ====================================================
+        st.write(
+            f"Başarıyla indirilen JS: "
+            f"**{downloaded} / {len(script_urls)}**"
+        )
 
-        api_urls = set()
 
-        for item in cleaned_urls:
+        # ----------------------------------------------------
+        # KATEGORİLER
+        # ----------------------------------------------------
+
+        categories = {
+
+            "STATISTICS": [],
+            "FIXTURE": [],
+            "LINEUP": [],
+            "PLAYER": [],
+            "EVENTS": [],
+            "SHOTS": [],
+            "XG": [],
+            "GRAPHQL": [],
+            "OTHER": []
+        }
+
+
+        for js_url, candidate in all_candidates:
+
+            low = candidate.lower()
+
 
             if (
-                "/api/" in item.lower()
-                or "api." in item.lower()
-                or "graphql" in item.lower()
+                "statistics" in low
+                or "statistic" in low
             ):
 
-                api_urls.add(item)
-
-
-        for item in api_paths:
-
-            api_urls.add(
-                urljoin(
-                    url,
-                    item
+                categories[
+                    "STATISTICS"
+                ].append(
+                    (js_url, candidate)
                 )
-            )
 
 
-        # ====================================================
-        # 5 — FUTBOL VERİSİYLE İLGİLİ ADRESLER
-        # ====================================================
+            elif "lineup" in low:
 
-        football_keywords = [
+                categories[
+                    "LINEUP"
+                ].append(
+                    (js_url, candidate)
+                )
 
-            "fixture",
-            "event",
-            "statistics",
-            "statistic",
-            "lineup",
-            "player",
-            "team",
-            "shot",
-            "goal",
-            "corner",
-            "xg",
-            "possession",
-            "momentum",
-            "match",
-            "incidents",
-            "formation",
-            "performance",
-            "trend",
-            "opponent"
+
+            elif "player" in low:
+
+                categories[
+                    "PLAYER"
+                ].append(
+                    (js_url, candidate)
+                )
+
+
+            elif (
+                "shots" in low
+            ):
+
+                categories[
+                    "SHOTS"
+                ].append(
+                    (js_url, candidate)
+                )
+
+
+            elif (
+                "xg" in low
+                or "expected-goals" in low
+            ):
+
+                categories[
+                    "XG"
+                ].append(
+                    (js_url, candidate)
+                )
+
+
+            elif (
+                "events" in low
+                or "/event" in low
+            ):
+
+                categories[
+                    "EVENTS"
+                ].append(
+                    (js_url, candidate)
+                )
+
+
+            elif (
+                "fixture" in low
+                or "match" in low
+            ):
+
+                categories[
+                    "FIXTURE"
+                ].append(
+                    (js_url, candidate)
+                )
+
+
+            elif "graphql" in low:
+
+                categories[
+                    "GRAPHQL"
+                ].append(
+                    (js_url, candidate)
+                )
+
+
+            elif "/api/" in low:
+
+                categories[
+                    "OTHER"
+                ].append(
+                    (js_url, candidate)
+                )
+
+
+            else:
+
+                categories[
+                    "OTHER"
+                ].append(
+                    (js_url, candidate)
+                )
+
+
+        # ----------------------------------------------------
+        # ÖZET
+        # ----------------------------------------------------
+
+        cols = st.columns(4)
+
+        cols[0].metric(
+            "Toplam aday",
+            len(all_candidates)
+        )
+
+        cols[1].metric(
+            "Statistics",
+            len(categories["STATISTICS"])
+        )
+
+        cols[2].metric(
+            "Player",
+            len(categories["PLAYER"])
+        )
+
+        cols[3].metric(
+            "Fixture",
+            len(categories["FIXTURE"])
+        )
+
+
+        # ----------------------------------------------------
+        # ÖNEMLİ KATEGORİLERİ GÖSTER
+        # ----------------------------------------------------
+
+        important_categories = [
+
+            "STATISTICS",
+            "FIXTURE",
+            "LINEUP",
+            "PLAYER",
+            "EVENTS",
+            "SHOTS",
+            "XG",
+            "GRAPHQL"
         ]
 
 
-        football_urls = set()
+        for category in important_categories:
 
-        all_possible = (
-            list(cleaned_urls)
-            + list(api_urls)
-            + [
-                urljoin(url, x)
-                for x in api_paths
+            items = categories[
+                category
             ]
-            + json_paths
-        )
+
+            if not items:
+                continue
 
 
-        for item in all_possible:
+            st.divider()
 
-            low = item.lower()
-
-            if any(
-                keyword in low
-                for keyword in football_keywords
-            ):
-
-                football_urls.add(item)
-
-
-        # ====================================================
-        # SONUÇLAR
-        # ====================================================
-
-        st.divider()
-
-        st.subheader(
-            "📊 Endpoint Keşif Sonucu"
-        )
-
-
-        col1, col2, col3 = st.columns(3)
-
-        col1.metric(
-            "HTTP URL",
-            len(cleaned_urls)
-        )
-
-        col2.metric(
-            "API URL",
-            len(api_urls)
-        )
-
-        col3.metric(
-            "Futbol Veri URL",
-            len(football_urls)
-        )
-
-
-        # ====================================================
-        # API ADRESLERİ
-        # ====================================================
-
-        st.divider()
-
-        st.subheader(
-            "🔌 API / GraphQL Adresleri"
-        )
-
-        if api_urls:
-
-            for i, item in enumerate(
-                sorted(api_urls),
-                1
-            ):
-
-                st.code(
-                    item,
-                    language="text"
-                )
-
-        else:
-
-            st.warning(
-                "HTML içinde açık bir /api/ adresi bulunamadı."
+            st.subheader(
+                f"⚽ {category}"
             )
 
 
-        # ====================================================
-        # FUTBOL VERİ ADRESLERİ
-        # ====================================================
-
-        st.divider()
-
-        st.subheader(
-            "⚽ Futbol Verisiyle İlgili Adresler"
-        )
-
-        if football_urls:
-
-            for i, item in enumerate(
-                sorted(football_urls),
-                1
-            ):
-
-                st.code(
-                    item,
-                    language="text"
-                )
-
-        else:
-
-            st.warning(
-                "Futbol veri endpointi bulunamadı."
+            # Aynı endpointleri temizle
+            unique_items = sorted(
+                set(items),
+                key=lambda x: x[1]
             )
 
 
-        # ====================================================
-        # JSON DOSYALARI
-        # ====================================================
+            for js_url, candidate in unique_items[:50]:
 
-        st.divider()
+                with st.expander(
+                    candidate[:180]
+                ):
 
-        st.subheader(
-            "📦 JSON Adresleri"
-        )
-
-        if json_paths:
-
-            unique_json = sorted(
-                set(json_paths)
-            )
-
-            for item in unique_json:
-
-                st.code(
-                    item,
-                    language="text"
-                )
-
-        else:
-
-            st.info(
-                "Açık JSON dosya adresi bulunamadı."
-            )
-
-
-        # ====================================================
-        # İLGİLİ HTML SATIRLARI
-        # ====================================================
-
-        st.divider()
-
-        st.subheader(
-            "🧩 Veri Anahtarları Bulundu mu?"
-        )
-
-        search_terms = [
-
-            "/api/",
-            "graphql",
-            "statistics",
-            "lineup",
-            "player",
-            "fixture",
-            "shots",
-            "xg",
-            "possession",
-            "events"
-        ]
-
-
-        found_terms = []
-
-        html_lower = html.lower()
-
-        for term in search_terms:
-
-            count = html_lower.count(
-                term.lower()
-            )
-
-            if count > 0:
-
-                found_terms.append(
-                    (term, count)
-                )
-
-
-        for term, count in found_terms:
-
-            st.write(
-                f"**{term}** → {count} kez"
-            )
-
-
-        # ====================================================
-        # HAM API İPUÇLARI
-        # ====================================================
-
-        st.divider()
-
-        st.subheader(
-            "🔬 JavaScript Veri İpuçları"
-        )
-
-        patterns = [
-
-            r'fetch\((.*?)\)',
-
-            r'axios\.(get|post)\((.*?)\)',
-
-            r'XMLHttpRequest',
-
-            r'graphql',
-
-            r'query\s*:',
-
-            r'endpoint',
-
-            r'baseURL',
-
-            r'apiUrl',
-
-            r'api_url'
-        ]
-
-
-        found_patterns = []
-
-        for pattern in patterns:
-
-            matches = re.findall(
-                pattern,
-                html,
-                re.I | re.S
-            )
-
-            if matches:
-
-                found_patterns.append(
-                    (
-                        pattern,
-                        len(matches)
+                    st.write(
+                        "Kaynak JavaScript:"
                     )
-                )
+
+                    st.code(
+                        js_url,
+                        language="text"
+                    )
+
+                    st.write(
+                        "Bulunan ifade:"
+                    )
+
+                    st.code(
+                        candidate,
+                        language="text"
+                    )
 
 
-        if found_patterns:
+        # ----------------------------------------------------
+        # TÜM ADAYLAR
+        # ----------------------------------------------------
 
-            for pattern, count in found_patterns:
+        st.divider()
+
+        st.subheader(
+            "🧩 Tüm API Adayları"
+        )
+
+
+        with st.expander(
+            "Tüm sonuçları göster"
+        ):
+
+            for js_url, candidate in sorted(
+                all_candidates,
+                key=lambda x: x[1]
+            ):
 
                 st.write(
-                    f"`{pattern}` → "
-                    f"**{count}** eşleşme"
+                    candidate
                 )
 
-        else:
 
-            st.info(
-                "Açık JavaScript API çağrısı bulunamadı."
-            )
-
-
-        # ====================================================
-        # ÖNEMLİ NOT
-        # ====================================================
+        # ----------------------------------------------------
+        # SONUÇ
+        # ----------------------------------------------------
 
         st.divider()
 
-        st.success(
-            "✅ Endpoint taraması tamamlandı."
-        )
+        if categories["STATISTICS"]:
 
-        st.caption(
-            "Sonraki aşamada bulunan gerçek endpointleri "
-            "tek tek test ederek hangi endpointin maç "
-            "istatistiklerini döndürdüğünü belirleyeceğiz."
+            st.success(
+                "🎯 Statistics ile ilgili endpoint "
+                "adayları bulundu!"
+            )
+
+        elif categories["FIXTURE"]:
+
+            st.warning(
+                "Fixture endpointleri bulundu fakat "
+                "statistics endpointi henüz doğrulanmadı."
+            )
+
+        else:
+
+            st.warning(
+                "Açık bir istatistik endpointi bulunamadı."
+            )
+
+
+        st.info(
+            "📌 Sonraki aşamada bulduğumuz adayları "
+            "doğrudan HTTP ile test edip hangisinin "
+            "gerçek JSON maç verisi döndürdüğünü "
+            "belirleyeceğiz."
         )
 
 
     except Exception as e:
 
         st.error(
-            "❌ Bir hata oluştu."
+            "❌ Hata oluştu."
         )
 
         st.exception(e)
