@@ -1,38 +1,321 @@
 import streamlit as st
 import requests
+import json
 import re
+from html.parser import HTMLParser
+from collections import Counter
 
 st.set_page_config(
-    page_title="StatsHub Data Discovery",
+    page_title="StatsHub Quant Engine",
     page_icon="⚽",
     layout="wide"
 )
 
-st.title("⚽ StatsHub Data Discovery")
+st.title("⚽ StatsHub Quant Engine")
+st.write("StatsHub sayfasındaki gerçek veri bloklarını otomatik keşfeder.")
+
+# ============================================================
+# HTML SCRIPT PARSER
+# ============================================================
+
+class ScriptParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.scripts = []
+        self.current = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "script":
+            attrs_dict = dict(attrs)
+            self.current = {
+                "attrs": attrs_dict,
+                "content": ""
+            }
+
+    def handle_data(self, data):
+        if self.current is not None:
+            self.current["content"] += data
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "script" and self.current is not None:
+            self.scripts.append(self.current)
+            self.current = None
+
+
+# ============================================================
+# JSON PARSE
+# ============================================================
+
+def try_json(text):
+    text = text.strip()
+
+    if not text:
+        return None
+
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+# ============================================================
+# RECURSIVE JSON WALKER
+# ============================================================
+
+def walk_json(obj, path="root"):
+    results = []
+
+    if isinstance(obj, dict):
+        results.append((path, obj))
+
+        for key, value in obj.items():
+            results.extend(
+                walk_json(value, f"{path}.{key}")
+            )
+
+    elif isinstance(obj, list):
+        for i, value in enumerate(obj):
+            results.extend(
+                walk_json(value, f"{path}[{i}]")
+            )
+
+    return results
+
+
+# ============================================================
+# JSON OBJECT DISCOVERY
+# ============================================================
+
+def extract_json_candidates(text):
+    candidates = []
+
+    # Önce doğrudan JSON dene
+    direct = try_json(text)
+
+    if direct is not None:
+        candidates.append(direct)
+
+    # Script içerisinde gömülü JSON araması
+    starts = []
+
+    for i, char in enumerate(text):
+        if char in "{[":
+            starts.append(i)
+
+    for start in starts:
+        opening = text[start]
+
+        if opening == "{":
+            closing = "}"
+        else:
+            closing = "]"
+
+        depth = 0
+        in_string = False
+        escape = False
+
+        for i in range(start, len(text)):
+
+            char = text[i]
+
+            if escape:
+                escape = False
+                continue
+
+            if char == "\\" and in_string:
+                escape = True
+                continue
+
+            if char == '"':
+                in_string = not in_string
+                continue
+
+            if in_string:
+                continue
+
+            if char == opening:
+                depth += 1
+
+            elif char == closing:
+                depth -= 1
+
+                if depth == 0:
+                    candidate = text[start:i + 1]
+
+                    try:
+                        parsed = json.loads(candidate)
+                        candidates.append(parsed)
+                    except Exception:
+                        pass
+
+                    break
+
+    return candidates
+
+
+# ============================================================
+# DATA CLASSIFICATION
+# ============================================================
+
+def classify(obj, fixture_id="416477"):
+
+    if not isinstance(obj, dict):
+        return "OTHER", 0
+
+    keys = {str(k).lower() for k in obj.keys()}
+    values = {str(v).lower() for v in obj.values()}
+
+    score = 0
+    category = "OTHER"
+
+    # Fixture
+    if (
+        str(obj.get("internalId")) == fixture_id
+        or str(obj.get("internalId")) == "416477"
+        or fixture_id in str(obj.get("slug", ""))
+    ):
+        return "FIXTURE", 100
+
+    # Team
+    team_keys = {
+        "shortname",
+        "countrySlug",
+        "teamcolorsprimary",
+        "foundationdate",
+        "venueid"
+    }
+
+    team_score = len(keys.intersection(team_keys))
+
+    if "name" in keys and team_score >= 2:
+        category = "TEAM"
+        score = max(score, 80)
+
+    # Referee
+    referee_keys = {
+        "yellowcards",
+        "redcards",
+        "yellowredcards",
+        "averagecards",
+        "firstleaguedebutTimestamp".lower()
+    }
+
+    if len(keys.intersection(referee_keys)) >= 2:
+        category = "REFEREE"
+        score = max(score, 85)
+
+    # Venue
+    venue_keys = {
+        "capacity",
+        "cityname",
+        "latitude",
+        "longitude"
+    }
+
+    if len(keys.intersection(venue_keys)) >= 2:
+        category = "VENUE"
+        score = max(score, 75)
+
+    # Tournament
+    tournament_keys = {
+        "categoryid",
+        "primarycolorhex",
+        "secondarycolorhex",
+        "hasperformancegraph",
+        "hasperformancegraph"
+    }
+
+    if (
+        "name" in keys
+        and len(keys.intersection(tournament_keys)) >= 2
+    ):
+        category = "TOURNAMENT"
+        score = max(score, 70)
+
+    # Player
+    player_keys = {
+        "playerid",
+        "jerseynumber",
+        "position",
+        "preferredfoot",
+        "height",
+        "dateofbirth"
+    }
+
+    if len(keys.intersection(player_keys)) >= 1:
+        category = "PLAYER"
+        score = max(score, 80)
+
+    # Stats
+    stat_keys = {
+        "shots",
+        "shotsontarget",
+        "goals",
+        "assists",
+        "xg",
+        "possession",
+        "corners",
+        "passes",
+        "keypasses",
+        "rating",
+        "tackles",
+        "interceptions",
+        "fouls",
+        "offsides",
+        "saves"
+    }
+
+    stat_score = len(keys.intersection(stat_keys))
+
+    if stat_score >= 2:
+        category = "STATISTICS"
+        score = max(score, 90)
+
+    # Lineup
+    lineup_keys = {
+        "lineup",
+        "formation",
+        "starting",
+        "substitutes",
+        "bench"
+    }
+
+    if len(keys.intersection(lineup_keys)) >= 2:
+        category = "LINEUP"
+        score = max(score, 85)
+
+    return category, score
+
+
+# ============================================================
+# UI
+# ============================================================
+
+st.divider()
 
 url = st.text_input(
-    "StatsHub maç URL'si:",
+    "StatsHub maç URL'sini gir:",
     value="https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
 )
 
-if st.button("🔎 VERİ YAPISINI ANALİZ ET", type="primary"):
+if st.button("🔍 GERÇEK VERİLERİ OTOMATİK BUL", type="primary"):
 
     if not url:
-        st.error("URL gir.")
+        st.warning("URL girmen gerekiyor.")
         st.stop()
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Linux; Android 16; Mobile) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
-            "Chrome/140.0 Mobile Safari/537.36"
-        )
-    }
 
     try:
 
-        with st.spinner("StatsHub verisi inceleniyor..."):
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml"
+        }
+
+        with st.spinner("StatsHub sayfası analiz ediliyor..."):
 
             response = requests.get(
                 url,
@@ -40,214 +323,156 @@ if st.button("🔎 VERİ YAPISINI ANALİZ ET", type="primary"):
                 timeout=30
             )
 
+        st.success(f"HTTP {response.status_code}")
+
         html = response.text
 
-        st.success("✅ StatsHub sayfası alındı.")
-
-        # ------------------------------------------------
-        # 1. TEMEL BİLGİLER
-        # ------------------------------------------------
-
-        st.subheader("📊 Temel Bilgiler")
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.metric("HTTP", response.status_code)
-
-        with col2:
-            st.metric("HTML", f"{len(html):,} karakter")
-
-        with col3:
-            st.metric(
-                "Script Sayısı",
-                len(re.findall(r"<script", html, re.I))
-            )
-
-        # ------------------------------------------------
-        # 2. ÖNEMLİ VERİ YAPILARI
-        # ------------------------------------------------
-
-        st.subheader("🧬 Veri Yapısı Kontrolü")
-
-        checks = {
-            "__NEXT_DATA__": "__NEXT_DATA__",
-            "JSON-LD": 'application/ld+json',
-            "API ifadeleri": "/api/",
-            "GraphQL": "graphql",
-            "Player": "player",
-            "Team": "team",
-            "Lineup": "lineup",
-            "Stats": "stats",
-            "Fixture ID": "416477"
-        }
-
-        for name, search_text in checks.items():
-
-            if search_text.lower() in html.lower():
-                st.success(f"✅ {name} bulundu")
-            else:
-                st.warning(f"⚠️ {name} bulunamadı")
-
-        # ------------------------------------------------
-        # 3. SCRIPT BLOKLARI
-        # ------------------------------------------------
-
-        st.subheader("📦 Script Veri Blokları")
-
-        scripts = re.findall(
-            r"<script[^>]*>(.*?)</script>",
-            html,
-            re.I | re.S
-        )
-
         st.write(
-            f"Toplam script bloğu: **{len(scripts)}**"
+            f"📄 HTML boyutu: **{len(html):,} karakter**"
         )
 
-        for i, script in enumerate(scripts):
+        # ----------------------------------------------------
+        # SCRIPTLERİ BUL
+        # ----------------------------------------------------
 
-            script_clean = script.strip()
+        parser = ScriptParser()
+        parser.feed(html)
 
-            if len(script_clean) > 100:
+        scripts = parser.scripts
 
-                with st.expander(
-                    f"Script #{i+1} — {len(script_clean):,} karakter"
+        st.info(
+            f"🔎 Sayfada **{len(scripts)} script bloğu** bulundu."
+        )
+
+        all_objects = []
+
+        # ----------------------------------------------------
+        # SCRIPT JSON TARAMA
+        # ----------------------------------------------------
+
+        for script_index, script in enumerate(scripts):
+
+            content = script["content"]
+
+            if not content.strip():
+                continue
+
+            candidates = extract_json_candidates(content)
+
+            for candidate in candidates:
+
+                for path, obj in walk_json(
+                    candidate,
+                    f"script[{script_index}]"
                 ):
 
-                    st.code(
-                        script_clean[:5000],
-                        language="javascript"
-                    )
+                    if isinstance(obj, dict):
 
-        # ------------------------------------------------
-        # 4. API URL'LERİ
-        # ------------------------------------------------
+                        category, score = classify(obj)
 
-        st.subheader("🌐 Bulunan API / Veri URL'leri")
+                        if score >= 50:
 
-        api_urls = sorted(
-            set(
-                re.findall(
-                    r'https?://[^"\']+',
-                    html
+                            all_objects.append({
+                                "script": script_index,
+                                "path": path,
+                                "category": category,
+                                "score": score,
+                                "data": obj
+                            })
+
+        # ----------------------------------------------------
+        # DUPLICATE TEMİZLE
+        # ----------------------------------------------------
+
+        unique = {}
+
+        for item in all_objects:
+
+            try:
+                fingerprint = json.dumps(
+                    item["data"],
+                    sort_keys=True,
+                    ensure_ascii=False
                 )
-            )
-        )
+            except Exception:
+                continue
 
-        if api_urls:
+            unique[fingerprint] = item
 
-            for api in api_urls[:100]:
-                st.code(api)
+        all_objects = list(unique.values())
 
-        else:
-
-            st.info(
-                "HTML içinde açık HTTP URL bulunamadı."
-            )
-
-        # ------------------------------------------------
-        # 5. JSON BENZERİ BLOKLAR
-        # ------------------------------------------------
-
-        st.subheader("🧩 JSON Benzeri Veri")
-
-        json_patterns = [
-            r'\{[^{}]{50,}\}',
-            r'\[[^\[\]]{50,}\]'
-        ]
-
-        found = []
-
-        for pattern in json_patterns:
-
-            matches = re.findall(
-                pattern,
-                html,
-                re.S
-            )
-
-            found.extend(matches)
-
-        found = sorted(
-            set(found),
-            key=len,
+        all_objects.sort(
+            key=lambda x: x["score"],
             reverse=True
         )
 
-        st.write(
-            f"Bulunan aday veri blokları: **{len(found)}**"
-        )
+        # ----------------------------------------------------
+        # SONUÇ
+        # ----------------------------------------------------
 
-        for i, block in enumerate(found[:20]):
+        st.divider()
 
-            with st.expander(
-                f"Aday veri #{i+1} — {len(block):,} karakter"
-            ):
+        st.subheader("📊 Otomatik Veri Keşfi")
 
-                st.code(
-                    block[:5000]
-                )
+        if not all_objects:
 
-        # ------------------------------------------------
-        # 6. PLAYER / TEAM ÇEVRESİ
-        # ------------------------------------------------
+            st.error(
+                "Gerçek futbol veri bloğu bulunamadı."
+            )
 
-        st.subheader("👤 Player / Team Veri Bölgeleri")
+        else:
 
-        keywords = [
-            "player",
-            "team",
-            "lineup",
-            "shots",
-            "goals",
-            "assists",
-            "passes",
-            "corners",
-            "xg",
-            "possession"
-        ]
+            counter = Counter(
+                x["category"]
+                for x in all_objects
+            )
 
-        for keyword in keywords:
+            cols = st.columns(6)
 
-            positions = [
-                m.start()
-                for m in re.finditer(
-                    keyword,
-                    html,
-                    re.I
-                )
+            categories = [
+                "FIXTURE",
+                "TEAM",
+                "PLAYER",
+                "STATISTICS",
+                "LINEUP",
+                "REFEREE"
             ]
 
-            if positions:
+            for col, cat in zip(cols, categories):
 
-                st.write(
-                    f"**{keyword}** → "
-                    f"{len(positions)} kez bulundu"
+                col.metric(
+                    cat,
+                    counter.get(cat, 0)
                 )
 
-                first_pos = positions[0]
+            st.divider()
+
+            st.subheader("🎯 Bulunan Gerçek Veri Blokları")
+
+            for i, item in enumerate(all_objects[:30], 1):
+
+                category = item["category"]
+                score = item["score"]
 
                 with st.expander(
-                    f"{keyword} ilk veri bölgesi"
+                    f"{i}. {category} | Güven skoru: {score} | Script #{item['script']}"
                 ):
 
-                    start = max(
-                        0,
-                        first_pos - 1000
+                    st.write(
+                        f"JSON yolu: `{item['path']}`"
                     )
 
-                    end = min(
-                        len(html),
-                        first_pos + 3000
-                    )
+                    st.json(item["data"])
 
-                    st.code(
-                        html[start:end]
-                    )
+        st.divider()
+
+        st.caption(
+            "Bu aşamada veri değiştirilmez veya tahmin üretilmez. "
+            "Amaç StatsHub sayfasındaki gerçek veri yapısını keşfetmektir."
+        )
 
     except Exception as e:
 
-        st.error(
-            f"❌ Hata: {e}"
-        )
+        st.error("Bir hata oluştu.")
+
+        st.exception(e)
