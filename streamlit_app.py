@@ -1,29 +1,34 @@
 import streamlit as st
 import requests
 import re
-import json
+from urllib.parse import urljoin
 
 st.set_page_config(
-    page_title="StatsHub Veri Analizi",
-    page_icon="⚽",
+    page_title="StatsHub Network Finder",
+    page_icon="🎯",
     layout="wide"
 )
 
-st.title("⚽ StatsHub Veri Yapısı Analizi")
+st.title("🎯 StatsHub Network Finder")
 
 url = st.text_input(
     "StatsHub maç URL'si",
     "https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
 )
 
-if st.button("🔎 VERİ YAPISINI BUL", type="primary"):
+if st.button("🚀 NETWORK ÇAĞRILARINI BUL", type="primary"):
 
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "text/html,application/xhtml+xml"
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9"
     }
 
-    with st.spinner("StatsHub verisi inceleniyor..."):
+    # --------------------------------------------------
+    # SAYFAYI AL
+    # --------------------------------------------------
+
+    with st.spinner("StatsHub sayfası alınıyor..."):
 
         try:
             response = requests.get(
@@ -35,321 +40,256 @@ if st.button("🔎 VERİ YAPISINI BUL", type="primary"):
             html = response.text
 
         except Exception as e:
-            st.error(f"Hata: {e}")
+            st.error(f"Bağlantı hatası: {e}")
             st.stop()
 
-    st.success(f"HTTP {response.status_code}")
+    st.success(
+        f"StatsHub bağlantısı başarılı — HTTP {response.status_code}"
+    )
 
     st.write(
         f"HTML uzunluğu: **{len(html):,} karakter**"
     )
 
-    # =====================================================
-    # 1. BİLDİĞİMİZ MAÇ KİMLİKLERİ
-    # =====================================================
+    # --------------------------------------------------
+    # JAVASCRIPT DOSYALARINI BUL
+    # --------------------------------------------------
 
-    st.subheader("🆔 1. Maç kimlikleri")
-
-    fixture_match = re.search(
-        r'"internalId"\s*:\s*(\d+)',
-        html
-    )
-
-    home_match = re.search(
-        r'"homeTeamId"\s*:\s*(\d+)',
-        html
-    )
-
-    away_match = re.search(
-        r'"awayTeamId"\s*:\s*(\d+)',
-        html
-    )
-
-    if fixture_match:
-        st.write(
-            f"**Fixture ID:** `{fixture_match.group(1)}`"
-        )
-
-    if home_match:
-        st.write(
-            f"**Home Team ID:** `{home_match.group(1)}`"
-        )
-
-    if away_match:
-        st.write(
-            f"**Away Team ID:** `{away_match.group(1)}`"
-        )
-
-    # =====================================================
-    # 2. SAYFADAKİ JSON BLOKLARINI BUL
-    # =====================================================
-
-    st.subheader("📦 2. JSON veri blokları")
-
-    json_blocks = []
-
-    # Script içindeki JSON benzeri alanları bul
-    script_pattern = r"<script[^>]*>(.*?)</script>"
+    st.subheader("📦 JavaScript dosyaları")
 
     scripts = re.findall(
-        script_pattern,
+        r'<script[^>]+src=["\']([^"\']+)["\']',
         html,
-        flags=re.I | re.S
+        flags=re.I
     )
 
-    for script in scripts:
+    js_urls = []
 
-        text = script.strip()
+    for src in scripts:
 
-        if len(text) < 20:
-            continue
+        full_url = urljoin(url, src)
 
-        # Doğrudan JSON
+        if full_url not in js_urls:
+            js_urls.append(full_url)
+
+    st.write(
+        f"Bulunan JavaScript: **{len(js_urls)}**"
+    )
+
+    # --------------------------------------------------
+    # JS DOSYALARINI İNDİR
+    # --------------------------------------------------
+
+    js_files = []
+
+    progress = st.progress(0)
+
+    for i, js_url in enumerate(js_urls):
+
         try:
 
-            data = json.loads(text)
+            r = requests.get(
+                js_url,
+                headers=headers,
+                timeout=10
+            )
 
-            json_blocks.append(data)
+            if r.status_code == 200:
+
+                text = r.text
+
+                # Güvenlik: devasa dosyaları sınırlıyoruz
+                if len(text) > 3_000_000:
+                    text = text[:3_000_000]
+
+                js_files.append({
+                    "url": js_url,
+                    "text": text
+                })
 
         except Exception:
             pass
 
-        # __next_f / RSC gibi yapılarda JSON parçaları
-        if "__next_f" in text:
-
-            pieces = re.findall(
-                r'\{.*?\}',
-                text,
-                flags=re.S
-            )
-
-            for piece in pieces[:100]:
-
-                try:
-
-                    data = json.loads(piece)
-
-                    json_blocks.append(data)
-
-                except Exception:
-                    pass
-
-    st.write(
-        f"Bulunan gerçek JSON nesnesi: **{len(json_blocks)}**"
-    )
-
-    # =====================================================
-    # 3. JSON İÇERİĞİNİ SINIFLANDIR
-    # =====================================================
-
-    fixture_data = []
-    team_data = []
-    player_data = []
-    stats_data = []
-    lineup_data = []
-    other_data = []
-
-    def classify(obj):
-
-        if not isinstance(obj, dict):
-            return "other"
-
-        keys = {
-            str(k).lower()
-            for k in obj.keys()
-        }
-
-        # Fixture
-        if (
-            "hometeamid" in keys
-            and "awayteamid" in keys
-        ):
-            return "fixture"
-
-        # Lineup
-        if (
-            "lineup" in keys
-            or "formation" in keys
-        ):
-            return "lineup"
-
-        # Statistics
-        stat_words = {
-            "shots",
-            "shotsontarget",
-            "possession",
-            "corners",
-            "goals",
-            "xg",
-            "expectedgoals",
-            "passes"
-        }
-
-        if len(keys.intersection(stat_words)) >= 2:
-            return "statistics"
-
-        # Player
-        player_words = {
-            "player",
-            "playerid",
-            "firstname",
-            "lastname",
-            "position"
-        }
-
-        if len(keys.intersection(player_words)) >= 2:
-            return "player"
-
-        # Team
-        if (
-            "teamid" in keys
-            and (
-                "name" in keys
-                or "shortname" in keys
-            )
-        ):
-            return "team"
-
-        return "other"
-
-    for obj in json_blocks:
-
-        category = classify(obj)
-
-        if category == "fixture":
-            fixture_data.append(obj)
-
-        elif category == "team":
-            team_data.append(obj)
-
-        elif category == "player":
-            player_data.append(obj)
-
-        elif category == "statistics":
-            stats_data.append(obj)
-
-        elif category == "lineup":
-            lineup_data.append(obj)
-
-        else:
-            other_data.append(obj)
-
-    # =====================================================
-    # 4. SONUÇLAR
-    # =====================================================
-
-    st.subheader("📊 3. Veri sınıflandırması")
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric(
-        "Fixture",
-        len(fixture_data)
-    )
-
-    col2.metric(
-        "Team",
-        len(team_data)
-    )
-
-    col3.metric(
-        "Player",
-        len(player_data)
-    )
-
-    col4, col5, col6 = st.columns(3)
-
-    col4.metric(
-        "Statistics",
-        len(stats_data)
-    )
-
-    col5.metric(
-        "Lineup",
-        len(lineup_data)
-    )
-
-    col6.metric(
-        "Other",
-        len(other_data)
-    )
-
-    # =====================================================
-    # 5. BULUNAN VERİLERİ GÖSTER
-    # =====================================================
-
-    categories = [
-        ("Fixture", fixture_data),
-        ("Team", team_data),
-        ("Player", player_data),
-        ("Statistics", stats_data),
-        ("Lineup", lineup_data)
-    ]
-
-    for name, data in categories:
-
-        if not data:
-            continue
-
-        st.subheader(
-            f"🔍 {name} verileri"
+        progress.progress(
+            (i + 1) / max(len(js_urls), 1)
         )
 
+    st.success(
+        f"{len(js_files)} JavaScript dosyası indirildi."
+    )
+
+    # --------------------------------------------------
+    # SADECE API ÇAĞRISI ÇEVRESİNDEKİ KODU BUL
+    # --------------------------------------------------
+
+    st.subheader("🔎 Network çağrıları")
+
+    search_patterns = [
+        ("FETCH", r'\bfetch\s*\('),
+        ("AXIOS", r'\baxios\b'),
+        ("XMLHttpRequest", r'\bXMLHttpRequest\b'),
+        ("GRAPHQL", r'\bgraphql\b'),
+        ("API PATH", r'["\'][^"\']*/api/[^"\']*["\']'),
+        ("BASE URL", r'\bbaseURL\b'),
+        ("API URL", r'\bapiUrl\b'),
+        ("EVENT ID", r'\beventId\b'),
+        ("MATCH STATS", r'\bmatchStats\b'),
+        ("PLAYER STATS", r'\bplayerStats\b'),
+        ("TEAM STATS", r'\bteamStats\b'),
+        ("LINEUPS", r'\blineups\b')
+    ]
+
+    findings = []
+
+    for js in js_files:
+
+        text = js["text"]
+
+        for name, pattern in search_patterns:
+
+            matches = list(
+                re.finditer(
+                    pattern,
+                    text,
+                    flags=re.I
+                )
+            )
+
+            # Her dosyadan en fazla 5 bölge
+            for match in matches[:5]:
+
+                start = max(
+                    0,
+                    match.start() - 500
+                )
+
+                end = min(
+                    len(text),
+                    match.end() + 1200
+                )
+
+                snippet = text[start:end]
+
+                findings.append({
+                    "name": name,
+                    "url": js["url"],
+                    "snippet": snippet
+                })
+
+    st.write(
+        f"Bulunan önemli kod bölgesi: **{len(findings)}**"
+    )
+
+    # --------------------------------------------------
+    # SADECE İSTATİSTİKLE İLGİLİ OLANLARI GÖSTER
+    # --------------------------------------------------
+
+    important_words = [
+        "fetch",
+        "axios",
+        "/api/",
+        "graphql",
+        "eventId",
+        "matchStats",
+        "playerStats",
+        "teamStats",
+        "lineups"
+    ]
+
+    filtered = []
+
+    for item in findings:
+
+        combined = (
+            item["name"] +
+            " " +
+            item["snippet"]
+        ).lower()
+
+        score = 0
+
+        for word in important_words:
+
+            if word.lower() in combined:
+                score += 1
+
+        item["score"] = score
+
+        if score >= 1:
+            filtered.append(item)
+
+    filtered.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    # --------------------------------------------------
+    # SONUÇLARI GÖSTER
+    # --------------------------------------------------
+
+    st.subheader("🎯 En önemli sonuçlar")
+
+    if not filtered:
+
+        st.warning(
+            "Statik JavaScript taramasında network çağrısı bulunamadı."
+        )
+
+    else:
+
         for i, item in enumerate(
-            data[:10],
+            filtered[:30],
             1
         ):
 
             with st.expander(
-                f"{name} #{i}"
+                f"#{i} — {item['name']} — Skor {item['score']}"
             ):
 
-                st.json(item)
+                st.write("JavaScript dosyası:")
 
-    # =====================================================
-    # 6. ÖNEMLİ KELİMELER
-    # =====================================================
+                st.code(
+                    item["url"],
+                    language="text"
+                )
 
-    st.subheader("🔎 4. StatsHub veri alanları")
+                st.write("Kod:")
 
-    keywords = [
-        "shots",
-        "shotsOnTarget",
-        "xg",
-        "expectedGoals",
-        "possession",
-        "corners",
-        "goals",
-        "passes",
-        "lineup",
-        "playerStats",
-        "teamStats",
-        "statistics"
-    ]
+                st.code(
+                    item["snippet"],
+                    language="javascript"
+                )
 
-    for word in keywords:
+    # --------------------------------------------------
+    # MAÇ ID'LERİ
+    # --------------------------------------------------
 
-        count = len(
-            re.findall(
-                re.escape(word),
-                html,
-                flags=re.I
-            )
+    st.subheader("🆔 Maç kimlikleri")
+
+    patterns = {
+        "Fixture": r'"internalId"\s*:\s*(\d+)',
+        "PSV / Home": r'"homeTeamId"\s*:\s*(\d+)',
+        "Shakhtar / Away": r'"awayTeamId"\s*:\s*(\d+)'
+    }
+
+    for name, pattern in patterns.items():
+
+        match = re.search(
+            pattern,
+            html,
+            flags=re.I
         )
 
-        if count > 0:
+        if match:
 
             st.write(
-                f"**{word}:** {count}"
+                f"**{name}:** `{match.group(1)}`"
             )
 
     st.divider()
 
-    st.success(
-        "Tarama tamamlandı."
-    )
-
     st.info(
-        "Şimdi sonuç ekranında hangi gerçek veri nesnelerinin "
-        "StatsHub HTML'sinde bulunduğunu göreceğiz."
+        "Buradaki amaç henüz istatistikleri çekmek değil. "
+        "Önce StatsHub'ın kullandığı gerçek network/API çağrısını "
+        "tespit ediyoruz."
     )
