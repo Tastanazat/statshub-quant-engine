@@ -1,270 +1,290 @@
-from playwright.sync_api import sync_playwright
-import os
+import requests
 import json
-import re
+import os
 import time
 
-URL = "https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
+# ============================================================
+# STATSHUB TEAM STATS DATA ENGINE
+# ============================================================
 
-os.makedirs("data/statshub_js", exist_ok=True)
+BASE_URL = "https://www.statshub.com"
 
-TARGETS = [
-    "corners",
-    "shots",
-    "crosses",
-    "tackles",
-    "possession",
-]
+TEAMS = {
+    "PSV": 2952,
+    "Shakhtar": 3313
+}
 
-all_scripts = []
-relevant_scripts = []
+TOURNAMENT_IDS = "7,37,330,340,679,17015"
 
-with sync_playwright() as p:
+FIXTURE_ID = 16938896
 
-    browser = p.chromium.launch(headless=True)
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json,text/plain,*/*"
+}
 
-    page = browser.new_page()
+# ============================================================
+# GERÇEK STATSHUB STATISTIC KEY'LERİ
+# ============================================================
 
-    print("StatsHub açılıyor...")
+STATISTICS = {
 
-    page.goto(
-        URL,
-        wait_until="domcontentloaded",
-        timeout=120000
+    "goals": "goals",
+
+    "corners": "cornerKicks",
+
+    "shots": "totalShotsOnGoal",
+
+    "crosses": "accurateCross",
+
+    "tackles": "totalTackle",
+
+    "possession": "ballPossession",
+
+    "cards": "cards",
+
+    "bigChanceCreated": "bigChanceCreated",
+
+    "bigChanceMissed": "bigChanceMissed",
+
+    "bigChanceScored": "bigChanceScored",
+
+    "expectedGoals": "expectedGoals",
+
+    "shotsOnGoal": "shotsOnGoal",
+
+    "shotsOffGoal": "shotsOffGoal",
+
+    "totalShotsInsideBox": "totalShotsInsideBox",
+
+    "totalShotsOutsideBox": "totalShotsOutsideBox",
+
+    "totalClearance": "totalClearance",
+
+    "dispossessed": "dispossessed",
+
+    "errorsLeadToGoal": "errorsLeadToGoal",
+
+    "errorsLeadToShot": "errorsLeadToShot",
+
+    "fouls": "fouls",
+
+    "goalkeeperSaves": "goalkeeperSaves",
+
+    "interceptionWon": "interceptionWon",
+
+    "freeKicks": "freeKicks",
+
+    "goalKicks": "goalKicks",
+
+    "throwIns": "throwIns",
+
+    "offsides": "offsides",
+
+    "passes": "passes",
+
+    "touchesInOppBox": "touchesInOppBox",
+
+    "redCards": "redCards",
+
+    "yellowCards": "yellowCards",
+
+}
+
+
+# ============================================================
+# KLASÖR
+# ============================================================
+
+os.makedirs(
+    "data",
+    exist_ok=True
+)
+
+
+# ============================================================
+# TEK İSTATİSTİK ÇEKME
+# ============================================================
+
+def fetch_stat(
+    team_id,
+    stat_key
+):
+
+    url = (
+        f"{BASE_URL}/api/team/{team_id}/event-statistics"
+        f"?eventType=all"
+        f"&statisticKey={stat_key}"
+        f"&eventHalf=ALL"
+        f"&tournamentIds={TOURNAMENT_IDS}"
+        f"&limit=20"
     )
 
-    time.sleep(8)
+    try:
 
-    print("Sayfa yüklendi.")
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=30
+        )
 
-    # ========================================================
-    # SAYFADAKİ SCRIPT URL'LERİNİ TOPLA
-    # ========================================================
-
-    script_locators = page.locator("script[src]")
-
-    count = script_locators.count()
-
-    print("Bulunan script:", count)
-
-    for i in range(count):
+        status = response.status_code
 
         try:
-
-            src = script_locators.nth(i).get_attribute("src")
-
-            if src and "_next/static" in src:
-
-                if src.startswith("/"):
-                    src = "https://www.statshub.com" + src
-
-                if src not in all_scripts:
-                    all_scripts.append(src)
-
+            data = response.json()
         except Exception:
-            pass
+            data = None
 
-    print(
-        "Next.js script:",
-        len(all_scripts)
-    )
+        # ----------------------------------------------------
+        # DATA KONTROL
+        # ----------------------------------------------------
 
-    # ========================================================
-    # HER JS DOSYASINI KAYDET
-    # ========================================================
+        records = []
 
-    for index, script_url in enumerate(
-        all_scripts,
-        start=1
-    ):
+        if isinstance(data, list):
 
-        try:
+            records = data
 
-            print(
-                f"[{index}/{len(all_scripts)}] JS indiriliyor..."
-            )
+        elif isinstance(data, dict):
 
-            response = page.request.get(
-                script_url,
-                timeout=60000
-            )
-
-            if response.status != 200:
-                continue
-
-            text = response.text()
-
-            # güvenli dosya adı
-            filename = (
-                f"{index:03d}_"
-                + script_url.split("/")[-1]
-            )
-
-            filepath = os.path.join(
-                "data/statshub_js",
-                filename
-            )
-
-            with open(
-                filepath,
-                "w",
-                encoding="utf-8"
-            ) as f:
-
-                f.write(text)
-
-            # =================================================
-            # HEDEF KELİMELERİ İÇEREN JS'LERİ BELİRLE
-            # =================================================
-
-            lower_text = text.lower()
-
-            found_targets = []
-
-            for target in TARGETS:
-
-                if target.lower() in lower_text:
-
-                    found_targets.append(
-                        target
-                    )
-
-            if (
-                found_targets
-                or "statistickey" in lower_text
-                or "event-statistics" in lower_text
+            if isinstance(
+                data.get("data"),
+                list
             ):
 
-                relevant_scripts.append({
-                    "url": script_url,
-                    "file": filepath,
-                    "length": len(text),
-                    "targets": found_targets,
-                    "has_statisticKey": (
-                        "statistickey" in lower_text
-                    ),
-                    "has_event_statistics": (
-                        "event-statistics"
-                        in lower_text
-                    )
-                })
+                records = data["data"]
 
-        except Exception as e:
+            elif isinstance(
+                data.get("result"),
+                list
+            ):
+
+                records = data["result"]
+
+        return {
+            "url": url,
+            "status_code": status,
+            "record_count": len(records),
+            "available": (
+                status == 200
+                and len(records) > 0
+            ),
+            "data": data
+        }
+
+    except Exception as e:
+
+        return {
+            "url": url,
+            "status_code": None,
+            "record_count": 0,
+            "available": False,
+            "error": str(e),
+            "data": None
+        }
+
+
+# ============================================================
+# TÜM VERİYİ TOPLA
+# ============================================================
+
+dataset = {
+
+    "source": "StatsHub",
+
+    "fixture_id": FIXTURE_ID,
+
+    "teams": TEAMS,
+
+    "tournament_ids": TOURNAMENT_IDS,
+
+    "statistics": STATISTICS,
+
+    "data": {}
+
+}
+
+
+# ============================================================
+# TAKIMLAR
+# ============================================================
+
+for team_name, team_id in TEAMS.items():
+
+    print("")
+    print("==========================================")
+    print(team_name)
+    print("Team ID:", team_id)
+    print("==========================================")
+
+    dataset["data"][team_name] = {}
+
+    for stat_name, stat_key in STATISTICS.items():
+
+        print(
+            f"{stat_name} -> {stat_key}",
+            end=" : "
+        )
+
+        result = fetch_stat(
+            team_id,
+            stat_key
+        )
+
+        dataset["data"][team_name][
+            stat_name
+        ] = {
+
+            "statistic_key": stat_key,
+
+            "url": result["url"],
+
+            "status_code": result[
+                "status_code"
+            ],
+
+            "record_count": result[
+                "record_count"
+            ],
+
+            "available": result[
+                "available"
+            ],
+
+            "data": result[
+                "data"
+            ]
+        }
+
+        if result["available"]:
 
             print(
-                "JS hata:",
-                str(e)
+                "OK",
+                result["record_count"],
+                "kayıt"
             )
 
-    # ========================================================
-    # SAYFA HTML'İNİ DE KAYDET
-    # ========================================================
+        else:
 
-    try:
+            print(
+                "N/A"
+            )
 
-        html = page.content()
-
-        with open(
-            "data/statshub_page.html",
-            "w",
-            encoding="utf-8"
-        ) as f:
-
-            f.write(html)
-
-    except Exception:
-        pass
-
-    browser.close()
+        time.sleep(0.15)
 
 
 # ============================================================
-# İLGİLİ JS LİSTESİ
+# ANA JSON
 # ============================================================
 
 with open(
-    "data/statshub_relevant_js.json",
+    "data/statshub_team_stats.json",
     "w",
     encoding="utf-8"
 ) as f:
 
     json.dump(
-        relevant_scripts,
-        f,
-        ensure_ascii=False,
-        indent=2
-    )
-
-
-# ============================================================
-# HEDEF KELİMELERİ VE ÇEVRESİNİ ÇIKAR
-# ============================================================
-
-snippets = []
-
-for item in relevant_scripts:
-
-    try:
-
-        with open(
-            item["file"],
-            "r",
-            encoding="utf-8"
-        ) as f:
-
-            text = f.read()
-
-        lower_text = text.lower()
-
-        for target in TARGETS:
-
-            start_pos = 0
-
-            while True:
-
-                pos = lower_text.find(
-                    target.lower(),
-                    start_pos
-                )
-
-                if pos == -1:
-                    break
-
-                start = max(
-                    0,
-                    pos - 1200
-                )
-
-                end = min(
-                    len(text),
-                    pos + 2500
-                )
-
-                snippets.append({
-                    "target": target,
-                    "file": item["file"],
-                    "script_url": item["url"],
-                    "snippet": text[start:end]
-                })
-
-                start_pos = pos + len(target)
-
-    except Exception:
-        pass
-
-
-# ============================================================
-# SNIPPET DOSYASI
-# ============================================================
-
-with open(
-    "data/statshub_target_snippets.json",
-    "w",
-    encoding="utf-8"
-) as f:
-
-    json.dump(
-        snippets,
+        dataset,
         f,
         ensure_ascii=False,
         indent=2
@@ -276,16 +296,49 @@ with open(
 # ============================================================
 
 summary = {
+
     "source": "StatsHub",
-    "fixture": URL,
-    "total_next_scripts": len(all_scripts),
-    "relevant_scripts": len(relevant_scripts),
-    "target_snippets": len(snippets),
-    "targets": TARGETS
+
+    "fixture_id": FIXTURE_ID,
+
+    "teams": list(
+        TEAMS.keys()
+    ),
+
+    "statistics": {},
+
 }
 
+
+for stat_name, stat_key in STATISTICS.items():
+
+    summary["statistics"][
+        stat_name
+    ] = {
+
+        "statistic_key": stat_key,
+
+        "PSV": dataset["data"]["PSV"][
+            stat_name
+        ]["available"],
+
+        "Shakhtar": dataset["data"]["Shakhtar"][
+            stat_name
+        ]["available"],
+
+        "PSV_records": dataset["data"]["PSV"][
+            stat_name
+        ]["record_count"],
+
+        "Shakhtar_records": dataset["data"]["Shakhtar"][
+            stat_name
+        ]["record_count"]
+
+    }
+
+
 with open(
-    "data/statshub_js_summary.json",
+    "data/statshub_team_stats_summary.json",
     "w",
     encoding="utf-8"
 ) as f:
@@ -298,34 +351,71 @@ with open(
     )
 
 
+# ============================================================
+# OK / N/A LİSTESİ
+# ============================================================
+
+with open(
+    "data/statshub_team_stats_status.txt",
+    "w",
+    encoding="utf-8"
+) as f:
+
+    for stat_name, stat_key in STATISTICS.items():
+
+        psv = dataset["data"]["PSV"][
+            stat_name
+        ]
+
+        sha = dataset["data"]["Shakhtar"][
+            stat_name
+        ]
+
+        f.write(
+            f"{stat_name} | "
+            f"{stat_key} | "
+            f"PSV={psv['record_count']} | "
+            f"Shakhtar={sha['record_count']} | "
+            f"PSV_OK={psv['available']} | "
+            f"Shakhtar_OK={sha['available']}\n"
+        )
+
+
+# ============================================================
+# SONUÇ
+# ============================================================
+
+print("")
 print("")
 print("==========================================")
-print("STATSHUB JS TAM TARAMA TAMAMLANDI")
+print("STATSHUB TEAM STATS ENGINE TAMAMLANDI")
 print("==========================================")
 print("")
+
 print(
-    "Toplam JS:",
-    len(all_scripts)
+    "Toplam istatistik:",
+    len(STATISTICS)
 )
-print(
-    "İlgili JS:",
-    len(relevant_scripts)
-)
-print(
-    "Bulunan hedef snippet:",
-    len(snippets)
-)
+
 print("")
-print("Hedefler:")
-print("CORNERS")
-print("SHOTS")
-print("CROSSES")
-print("TACKLES")
-print("POSSESSION")
+
+for stat_name, stat_key in STATISTICS.items():
+
+    psv_count = dataset["data"]["PSV"][
+        stat_name
+    ]["record_count"]
+
+    sha_count = dataset["data"]["Shakhtar"][
+        stat_name
+    ]["record_count"]
+
+    print(
+        f"{stat_name:30} "
+        f"PSV={psv_count:2} "
+        f"Shakhtar={sha_count:2}"
+    )
+
 print("")
-print("Dosyalar:")
-print("data/statshub_js/")
-print("data/statshub_relevant_js.json")
-print("data/statshub_target_snippets.json")
-print("data/statshub_js_summary.json")
+print("JSON:")
+print("data/statshub_team_stats.json")
 print("")
