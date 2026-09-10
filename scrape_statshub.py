@@ -1,56 +1,29 @@
 from playwright.sync_api import sync_playwright
-import json
 import os
+import json
 import re
 import time
 
 URL = "https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
 
+os.makedirs("data/statshub_js", exist_ok=True)
+
 TARGETS = [
-    "CORNERS",
-    "SHOTS",
-    "CROSSES",
-    "TACKLES",
-    "POSSESSION",
+    "corners",
+    "shots",
+    "crosses",
+    "tackles",
+    "possession",
 ]
 
-os.makedirs("data", exist_ok=True)
-
-js_hits = []
-api_hits = []
+all_scripts = []
+relevant_scripts = []
 
 with sync_playwright() as p:
 
-    browser = p.chromium.launch(
-        headless=True
-    )
+    browser = p.chromium.launch(headless=True)
 
     page = browser.new_page()
-
-    # -------------------------------------------------------
-    # RESPONSE YAKALAMA
-    # -------------------------------------------------------
-
-    def response_handler(response):
-
-        try:
-            url = response.url
-
-            if "/api/" in url:
-                api_hits.append({
-                    "status": response.status,
-                    "url": url,
-                    "method": response.request.method
-                })
-
-        except Exception:
-            pass
-
-    page.on("response", response_handler)
-
-    # -------------------------------------------------------
-    # SAYFAYI AÇ
-    # -------------------------------------------------------
 
     print("StatsHub açılıyor...")
 
@@ -60,56 +33,59 @@ with sync_playwright() as p:
         timeout=120000
     )
 
-    time.sleep(5)
+    time.sleep(8)
 
     print("Sayfa yüklendi.")
 
-    # -------------------------------------------------------
-    # SAYFADAKİ TÜM SCRIPT URL'LERİNİ AL
-    # -------------------------------------------------------
+    # ========================================================
+    # SAYFADAKİ SCRIPT URL'LERİNİ TOPLA
+    # ========================================================
 
-    scripts = page.locator("script[src]")
+    script_locators = page.locator("script[src]")
 
-    script_urls = []
+    count = script_locators.count()
 
-    for i in range(scripts.count()):
+    print("Bulunan script:", count)
+
+    for i in range(count):
 
         try:
 
-            src = scripts.nth(i).get_attribute("src")
+            src = script_locators.nth(i).get_attribute("src")
 
-            if src:
-                script_urls.append(src)
+            if src and "_next/static" in src:
+
+                if src.startswith("/"):
+                    src = "https://www.statshub.com" + src
+
+                if src not in all_scripts:
+                    all_scripts.append(src)
 
         except Exception:
             pass
 
     print(
-        "Script sayısı:",
-        len(script_urls)
+        "Next.js script:",
+        len(all_scripts)
     )
 
-    # -------------------------------------------------------
-    # JS DOSYALARINI OKU
-    # -------------------------------------------------------
+    # ========================================================
+    # HER JS DOSYASINI KAYDET
+    # ========================================================
 
-    for i, script_url in enumerate(
-        script_urls,
+    for index, script_url in enumerate(
+        all_scripts,
         start=1
     ):
 
         try:
 
-            if script_url.startswith("/"):
-                full_url = (
-                    "https://www.statshub.com"
-                    + script_url
-                )
-            else:
-                full_url = script_url
+            print(
+                f"[{index}/{len(all_scripts)}] JS indiriliyor..."
+            )
 
             response = page.request.get(
-                full_url,
+                script_url,
                 timeout=60000
             )
 
@@ -118,99 +94,83 @@ with sync_playwright() as p:
 
             text = response.text()
 
-            # ------------------------------------------------
-            # TEAM EVENT-STATISTICS İFADELERİNİ BUL
-            # ------------------------------------------------
+            # güvenli dosya adı
+            filename = (
+                f"{index:03d}_"
+                + script_url.split("/")[-1]
+            )
+
+            filepath = os.path.join(
+                "data/statshub_js",
+                filename
+            )
+
+            with open(
+                filepath,
+                "w",
+                encoding="utf-8"
+            ) as f:
+
+                f.write(text)
+
+            # =================================================
+            # HEDEF KELİMELERİ İÇEREN JS'LERİ BELİRLE
+            # =================================================
+
+            lower_text = text.lower()
+
+            found_targets = []
+
+            for target in TARGETS:
+
+                if target.lower() in lower_text:
+
+                    found_targets.append(
+                        target
+                    )
 
             if (
-                "event-statistics" in text
-                or "statisticKey" in text
-                or "possession" in text.lower()
-                or "corners" in text.lower()
-                or "tackles" in text.lower()
-                or "crosses" in text.lower()
+                found_targets
+                or "statistickey" in lower_text
+                or "event-statistics" in lower_text
             ):
 
-                js_hits.append({
-                    "script": full_url,
-                    "length": len(text)
+                relevant_scripts.append({
+                    "url": script_url,
+                    "file": filepath,
+                    "length": len(text),
+                    "targets": found_targets,
+                    "has_statisticKey": (
+                        "statistickey" in lower_text
+                    ),
+                    "has_event_statistics": (
+                        "event-statistics"
+                        in lower_text
+                    )
                 })
 
-                # --------------------------------------------
-                # event-statistics çevresindeki parçaları al
-                # --------------------------------------------
+        except Exception as e:
 
-                for match in re.finditer(
-                    r"event-statistics",
-                    text,
-                    re.IGNORECASE
-                ):
+            print(
+                "JS hata:",
+                str(e)
+            )
 
-                    start = max(
-                        0,
-                        match.start() - 1500
-                    )
-
-                    end = min(
-                        len(text),
-                        match.end() + 3000
-                    )
-
-                    snippet = text[start:end]
-
-                    js_hits[-1].setdefault(
-                        "snippets",
-                        []
-                    ).append(snippet)
-
-        except Exception:
-            continue
-
-    # -------------------------------------------------------
-    # TEAM STATS SAYFASINA TIKLA
-    # -------------------------------------------------------
+    # ========================================================
+    # SAYFA HTML'İNİ DE KAYDET
+    # ========================================================
 
     try:
 
-        team_stats = page.get_by_text(
-            "Team Stats",
-            exact=True
-        ).first
-
-        team_stats.click(
-            timeout=10000
-        )
-
-        time.sleep(4)
-
-        print(
-            "Team Stats açıldı."
-        )
-
-    except Exception as e:
-
-        print(
-            "Team Stats tıklanamadı:",
-            str(e)
-        )
-
-    # -------------------------------------------------------
-    # SAYFADAKİ TÜM METNİ KAYDET
-    # -------------------------------------------------------
-
-    try:
-
-        page_text = page.locator(
-            "body"
-        ).inner_text()
+        html = page.content()
 
         with open(
-            "data/statshub_team_stats_page.txt",
+            "data/statshub_page.html",
             "w",
             encoding="utf-8"
         ) as f:
 
-            f.write(page_text)
+            f.write(html)
 
     except Exception:
         pass
@@ -219,49 +179,17 @@ with sync_playwright() as p:
 
 
 # ============================================================
-# API URL'LERİNİ TEMİZLE
-# ============================================================
-
-unique_api = []
-
-seen = set()
-
-for item in api_hits:
-
-    url = item["url"]
-
-    if url not in seen:
-
-        seen.add(url)
-        unique_api.append(item)
-
-
-# ============================================================
-# SONUÇLARI KAYDET
+# İLGİLİ JS LİSTESİ
 # ============================================================
 
 with open(
-    "data/statshub_js_discovery.json",
+    "data/statshub_relevant_js.json",
     "w",
     encoding="utf-8"
 ) as f:
 
     json.dump(
-        js_hits,
-        f,
-        ensure_ascii=False,
-        indent=2
-    )
-
-
-with open(
-    "data/statshub_api_capture.json",
-    "w",
-    encoding="utf-8"
-) as f:
-
-    json.dump(
-        unique_api,
+        relevant_scripts,
         f,
         ensure_ascii=False,
         indent=2
@@ -269,40 +197,135 @@ with open(
 
 
 # ============================================================
-# URL LİSTESİ
+# HEDEF KELİMELERİ VE ÇEVRESİNİ ÇIKAR
+# ============================================================
+
+snippets = []
+
+for item in relevant_scripts:
+
+    try:
+
+        with open(
+            item["file"],
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            text = f.read()
+
+        lower_text = text.lower()
+
+        for target in TARGETS:
+
+            start_pos = 0
+
+            while True:
+
+                pos = lower_text.find(
+                    target.lower(),
+                    start_pos
+                )
+
+                if pos == -1:
+                    break
+
+                start = max(
+                    0,
+                    pos - 1200
+                )
+
+                end = min(
+                    len(text),
+                    pos + 2500
+                )
+
+                snippets.append({
+                    "target": target,
+                    "file": item["file"],
+                    "script_url": item["url"],
+                    "snippet": text[start:end]
+                })
+
+                start_pos = pos + len(target)
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# SNIPPET DOSYASI
 # ============================================================
 
 with open(
-    "data/statshub_api_urls.txt",
+    "data/statshub_target_snippets.json",
     "w",
     encoding="utf-8"
 ) as f:
 
-    for item in unique_api:
+    json.dump(
+        snippets,
+        f,
+        ensure_ascii=False,
+        indent=2
+    )
 
-        f.write(
-            f'{item["status"]} | {item["url"]}\n'
-        )
+
+# ============================================================
+# ÖZET
+# ============================================================
+
+summary = {
+    "source": "StatsHub",
+    "fixture": URL,
+    "total_next_scripts": len(all_scripts),
+    "relevant_scripts": len(relevant_scripts),
+    "target_snippets": len(snippets),
+    "targets": TARGETS
+}
+
+with open(
+    "data/statshub_js_summary.json",
+    "w",
+    encoding="utf-8"
+) as f:
+
+    json.dump(
+        summary,
+        f,
+        ensure_ascii=False,
+        indent=2
+    )
 
 
 print("")
 print("==========================================")
-print("STATSHUB JS KEŞİF TAMAMLANDI")
+print("STATSHUB JS TAM TARAMA TAMAMLANDI")
 print("==========================================")
 print("")
 print(
-    "API çağrısı:",
-    len(unique_api)
+    "Toplam JS:",
+    len(all_scripts)
 )
 print(
-    "İlgili JS dosyası:",
-    len(js_hits)
+    "İlgili JS:",
+    len(relevant_scripts)
+)
+print(
+    "Bulunan hedef snippet:",
+    len(snippets)
 )
 print("")
-print("Oluşturulan dosyalar:")
+print("Hedefler:")
+print("CORNERS")
+print("SHOTS")
+print("CROSSES")
+print("TACKLES")
+print("POSSESSION")
 print("")
-print("statshub_js_discovery.json")
-print("statshub_api_capture.json")
-print("statshub_api_urls.txt")
-print("statshub_team_stats_page.txt")
+print("Dosyalar:")
+print("data/statshub_js/")
+print("data/statshub_relevant_js.json")
+print("data/statshub_target_snippets.json")
+print("data/statshub_js_summary.json")
 print("")
