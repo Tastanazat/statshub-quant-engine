@@ -1,0 +1,32 @@
+name: StatsHub Browser Scan
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Run StatsHub scanner
+        run: |
+          python scrape_statshub.py
+
+      - name: Upload StatsHub data
+        uses: actions/upload-artifact@v4
+        with:
+          name: statshub-scan
+          path: data/
