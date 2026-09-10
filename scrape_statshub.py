@@ -1,99 +1,90 @@
-from playwright.sync_api import sync_playwright
+import requests
 import json
 import os
 
-URL = "https://www.statshub.com/fixture/psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
-
 os.makedirs("data", exist_ok=True)
 
-responses = []
+BASE = "https://www.statshub.com"
 
-def handle_response(response):
-    request = response.request
+EVENT_ID = 16938896
+FIXTURE_ID = 416477
 
-    if request.resource_type in ("xhr", "fetch"):
-        url = response.url
+TEAMS = {
+    "PSV": 2952,
+    "Shakhtar": 3313
+}
 
-        if "statshub.com" in url:
-            item = {
-                "url": url,
-                "status": response.status,
-                "method": request.method,
-                "resource_type": request.resource_type,
-                "content_type": response.headers.get("content-type", "")
-            }
+TOURNAMENTS = "7,37,330,340,679,17015"
 
-            if "/api/" in url:
-                try:
-                    item["body"] = response.text()[:30000]
-                except Exception:
-                    item["body"] = ""
+headers = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json,text/plain,*/*"
+}
 
-            responses.append(item)
+results = {}
 
+for team_name, team_id in TEAMS.items():
 
-with sync_playwright() as p:
-
-    browser = p.chromium.launch(headless=True)
-
-    page = browser.new_page()
-
-    page.on("response", handle_response)
-
-    print("StatsHub açılıyor...")
-
-    page.goto(
-        URL,
-        wait_until="domcontentloaded",
-        timeout=60000
+    url = (
+        f"{BASE}/api/team/{team_id}/players/performance"
+        f"?tournamentId={TOURNAMENTS}"
+        f"&limit=20"
+        f"&location=both"
+        f"&fixtureId={EVENT_ID}"
     )
 
-    page.wait_for_timeout(5000)
+    print(f"{team_name} verisi çekiliyor...")
 
     try:
-        player_stats = page.get_by_text(
-            "Player Stats",
-            exact=True
-        ).first
-
-        player_stats.click(timeout=5000)
-
-        page.wait_for_timeout(5000)
-
-    except Exception:
-        pass
-
-    html = page.content()
-
-    text = page.locator("body").inner_text()
-
-    with open(
-        "data/statshub_rendered.html",
-        "w",
-        encoding="utf-8"
-    ) as f:
-        f.write(html)
-
-    with open(
-        "data/statshub_text.txt",
-        "w",
-        encoding="utf-8"
-    ) as f:
-        f.write(text)
-
-    with open(
-        "data/network.json",
-        "w",
-        encoding="utf-8"
-    ) as f:
-        json.dump(
-            responses,
-            f,
-            ensure_ascii=False,
-            indent=2
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=30
         )
 
-    print("Tarama tamamlandı.")
-    print("Network kayıtları:", len(responses))
+        print(
+            team_name,
+            "HTTP:",
+            response.status_code
+        )
 
-    browser.close()
+        try:
+            data = response.json()
+        except Exception:
+            data = {
+                "raw_text": response.text
+            }
+
+        results[team_name] = {
+            "team_id": team_id,
+            "url": url,
+            "status_code": response.status_code,
+            "data": data
+        }
+
+    except Exception as e:
+
+        results[team_name] = {
+            "team_id": team_id,
+            "url": url,
+            "error": str(e)
+        }
+
+
+with open(
+    "data/statshub_players.json",
+    "w",
+    encoding="utf-8"
+) as f:
+
+    json.dump(
+        results,
+        f,
+        ensure_ascii=False,
+        indent=2
+    )
+
+
+print("================================")
+print("StatsHub API testi tamamlandı.")
+print("================================")
