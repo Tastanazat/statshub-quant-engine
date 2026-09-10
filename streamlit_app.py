@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import re
 from urllib.parse import urljoin
+from collections import defaultdict
 
 
 # ============================================================
@@ -9,21 +10,22 @@ from urllib.parse import urljoin
 # ============================================================
 
 st.set_page_config(
-    page_title="StatsHub JS API Discovery",
-    page_icon="🔬",
+    page_title="StatsHub API Finder",
+    page_icon="🎯",
     layout="wide"
 )
 
-st.title("🔬 StatsHub JavaScript API Discovery")
+st.title("🎯 StatsHub Gerçek API Finder")
 
 st.write(
-    "StatsHub sayfasının JavaScript dosyalarını tarar ve "
-    "maç verisinin çağrıldığı olası endpointleri bulur."
+    "StatsHub JavaScript dosyalarını tarar, "
+    "gerçek futbol veri endpointi olabilecek adresleri "
+    "puanlayarak öne çıkarır."
 )
 
 st.info(
-    "⚠️ Bu aşamada tahmin yapılmaz. "
-    "Amaç yalnızca StatsHub veri kaynağını bulmaktır."
+    "⚠️ Bu aşamada bahis tahmini yapılmaz. "
+    "Sadece StatsHub veri kaynağı bulunur."
 )
 
 
@@ -42,10 +44,10 @@ url = st.text_input(
 
 
 # ============================================================
-# HTTP AYARLARI
+# HTTP
 # ============================================================
 
-headers = {
+HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 "
@@ -58,21 +60,19 @@ headers = {
 
 
 # ============================================================
-# SCRIPT URL'LERİNİ BUL
+# SCRIPT URL BUL
 # ============================================================
 
 def find_script_urls(html, page_url):
-
-    results = set()
 
     pattern = re.compile(
         r'<script[^>]+src=["\']([^"\']+)["\']',
         re.I
     )
 
-    matches = pattern.findall(html)
+    results = set()
 
-    for src in matches:
+    for src in pattern.findall(html):
 
         full_url = urljoin(
             page_url,
@@ -85,35 +85,253 @@ def find_script_urls(html, page_url):
 
 
 # ============================================================
-# JAVASCRIPT İÇERİĞİNDE API İPUÇLARINI BUL
+# GEREKSİZ URL KONTROLÜ
 # ============================================================
 
-def find_api_candidates(js):
+def is_noise(value):
+
+    low = value.lower()
+
+    noise_words = [
+        "fontshare",
+        "fonts.googleapis",
+        "googleapis",
+        "woff",
+        "woff2",
+        "sentry",
+        "umami",
+        "analytics",
+        "facebook",
+        "twitter",
+        "instagram",
+        "youtube",
+        "schema.org",
+        "cloudflare"
+    ]
+
+    for word in noise_words:
+
+        if word in low:
+            return True
+
+    return False
+
+
+# ============================================================
+# ENDPOINT PUANLAMA
+# ============================================================
+
+def score_endpoint(value):
+
+    low = value.lower()
+
+    if is_noise(value):
+
+        return -100, ["NOISE"]
+
+
+    score = 0
+    reasons = []
+
+
+    # --------------------------------------------------------
+    # API
+    # --------------------------------------------------------
+
+    if "/api/" in low:
+
+        score += 30
+        reasons.append("/api/")
+
+
+    if "graphql" in low:
+
+        score += 30
+        reasons.append("graphql")
+
+
+    # --------------------------------------------------------
+    # FIXTURE
+    # --------------------------------------------------------
+
+    if "fixture" in low:
+
+        score += 25
+        reasons.append("fixture")
+
+
+    if "416477" in low:
+
+        score += 40
+        reasons.append("MATCH_ID")
+
+
+    # --------------------------------------------------------
+    # STATISTICS
+    # --------------------------------------------------------
+
+    if "statistics" in low:
+
+        score += 50
+        reasons.append("statistics")
+
+
+    if "statistic" in low:
+
+        score += 40
+        reasons.append("statistic")
+
+
+    # --------------------------------------------------------
+    # PLAYER
+    # --------------------------------------------------------
+
+    if "player" in low:
+
+        score += 25
+        reasons.append("player")
+
+
+    # --------------------------------------------------------
+    # TEAM
+    # --------------------------------------------------------
+
+    if "team" in low:
+
+        score += 20
+        reasons.append("team")
+
+
+    # --------------------------------------------------------
+    # LINEUP
+    # --------------------------------------------------------
+
+    if "lineup" in low:
+
+        score += 40
+        reasons.append("lineup")
+
+
+    # --------------------------------------------------------
+    # EVENTS
+    # --------------------------------------------------------
+
+    if "events" in low:
+
+        score += 35
+        reasons.append("events")
+
+
+    if "/event" in low:
+
+        score += 30
+        reasons.append("event")
+
+
+    # --------------------------------------------------------
+    # SHOTS
+    # --------------------------------------------------------
+
+    if "shots" in low:
+
+        score += 35
+        reasons.append("shots")
+
+
+    # --------------------------------------------------------
+    # XG
+    # --------------------------------------------------------
+
+    if "xg" in low:
+
+        score += 45
+        reasons.append("xg")
+
+
+    if "expected-goal" in low:
+
+        score += 45
+        reasons.append("expected-goals")
+
+
+    # --------------------------------------------------------
+    # POSSESSION
+    # --------------------------------------------------------
+
+    if "possession" in low:
+
+        score += 30
+        reasons.append("possession")
+
+
+    # --------------------------------------------------------
+    # CORNERS
+    # --------------------------------------------------------
+
+    if "corner" in low:
+
+        score += 25
+        reasons.append("corner")
+
+
+    # --------------------------------------------------------
+    # MOMENTUM
+    # --------------------------------------------------------
+
+    if "momentum" in low:
+
+        score += 30
+        reasons.append("momentum")
+
+
+    # --------------------------------------------------------
+    # MATCH
+    # --------------------------------------------------------
+
+    if "match" in low:
+
+        score += 20
+        reasons.append("match")
+
+
+    # --------------------------------------------------------
+    # JSON
+    # --------------------------------------------------------
+
+    if ".json" in low:
+
+        score += 20
+        reasons.append("json")
+
+
+    return score, reasons
+
+
+# ============================================================
+# JS İÇERİĞİNDEN ADRESLERİ BUL
+# ============================================================
+
+def extract_strings(js):
 
     results = set()
 
+
     patterns = [
 
+        # URL
+        r'https?://[^"\'\s<>]+',
+
         # /api/...
-        r'["\']([^"\']*/api/[^"\']+)["\']',
+        r'["\'](/api/[^"\']+)["\']',
 
-        # absolute https URLs
-        r'["\'](https?://[^"\']+)["\']',
-
-        # fetch("...")
-        r'fetch\s*\(\s*["\']([^"\']+)["\']',
-
-        # axios.get("...")
-        r'axios\.(?:get|post|put|delete)\s*\(\s*["\']([^"\']+)["\']',
-
-        # graphql
-        r'["\']([^"\']*graphql[^"\']*)["\']',
-
-        # fixture paths
+        # fixture
         r'["\']([^"\']*fixture[^"\']*)["\']',
 
         # statistics
-        r'["\']([^"\']*(?:statistics|statistic)[^"\']*)["\']',
+        r'["\']([^"\']*statistics[^"\']*)["\']',
+
+        # statistic
+        r'["\']([^"\']*statistic[^"\']*)["\']',
 
         # lineup
         r'["\']([^"\']*lineup[^"\']*)["\']',
@@ -121,14 +339,29 @@ def find_api_candidates(js):
         # player
         r'["\']([^"\']*player[^"\']*)["\']',
 
+        # team
+        r'["\']([^"\']*team[^"\']*)["\']',
+
         # events
-        r'["\']([^"\']*(?:events|event)[^"\']*)["\']',
+        r'["\']([^"\']*events[^"\']*)["\']',
 
         # shots
         r'["\']([^"\']*shots[^"\']*)["\']',
 
         # xg
-        r'["\']([^"\']*(?:xg|expected-goals)[^"\']*)["\']'
+        r'["\']([^"\']*(?:xg|expected-goals)[^"\']*)["\']',
+
+        # possession
+        r'["\']([^"\']*possession[^"\']*)["\']',
+
+        # corners
+        r'["\']([^"\']*corner[^"\']*)["\']',
+
+        # fetch
+        r'fetch\(\s*["\']([^"\']+)["\']',
+
+        # axios
+        r'axios\.(?:get|post|put|delete)\(\s*["\']([^"\']+)["\']'
     ]
 
 
@@ -146,10 +379,10 @@ def find_api_candidates(js):
 
                 if isinstance(match, tuple):
 
-                    for value in match:
+                    for item in match:
 
-                        if value:
-                            results.add(value)
+                        if item:
+                            results.add(item)
 
                 else:
 
@@ -163,18 +396,18 @@ def find_api_candidates(js):
 
 
 # ============================================================
-# ANA İŞLEM
+# BUTON
 # ============================================================
 
 if st.button(
-    "🚀 JAVASCRIPT DOSYALARINI TARA",
+    "🎯 GERÇEK API ADAYLARINI BUL",
     type="primary"
 ):
 
     if not url:
 
         st.warning(
-            "StatsHub URL'si girmen gerekiyor."
+            "StatsHub URL'si gir."
         )
 
         st.stop()
@@ -183,7 +416,7 @@ if st.button(
     try:
 
         # ----------------------------------------------------
-        # SAYFAYI İNDİR
+        # SAYFAYI AL
         # ----------------------------------------------------
 
         with st.spinner(
@@ -192,9 +425,12 @@ if st.button(
 
             response = requests.get(
                 url,
-                headers=headers,
+                headers=HEADERS,
                 timeout=30
             )
+
+
+        html = response.text
 
 
         st.success(
@@ -202,17 +438,14 @@ if st.button(
         )
 
 
-        html = response.text
-
-
         st.write(
-            f"📄 HTML: "
+            f"📄 HTML boyutu: "
             f"**{len(html):,} karakter**"
         )
 
 
         # ----------------------------------------------------
-        # SCRIPT DOSYALARINI BUL
+        # JS DOSYALARI
         # ----------------------------------------------------
 
         script_urls = find_script_urls(
@@ -221,60 +454,28 @@ if st.button(
         )
 
 
-        st.divider()
-
-        st.subheader(
-            "📜 JavaScript Dosyaları"
+        st.info(
+            f"📜 **{len(script_urls)} JavaScript dosyası bulundu.**"
         )
 
 
-        st.metric(
-            "Bulunan JS dosyası",
-            len(script_urls)
+        # ----------------------------------------------------
+        # TARAMA
+        # ----------------------------------------------------
+
+        candidates = defaultdict(
+            lambda: {
+                "score": 0,
+                "reasons": set(),
+                "sources": set()
+            }
         )
-
-
-        if not script_urls:
-
-            st.error(
-                "JavaScript dosyası bulunamadı."
-            )
-
-            st.stop()
-
-
-        # ----------------------------------------------------
-        # JS LİSTESİ
-        # ----------------------------------------------------
-
-        for i, js_url in enumerate(
-            script_urls,
-            1
-        ):
-
-            st.code(
-                f"{i}. {js_url}",
-                language="text"
-            )
-
-
-        # ----------------------------------------------------
-        # JS DOSYALARINI İNDİR
-        # ----------------------------------------------------
-
-        st.divider()
-
-        st.subheader(
-            "⬇️ JavaScript Analizi"
-        )
-
-
-        all_candidates = set()
-
-        downloaded = 0
 
 
         progress = st.progress(0)
+
+
+        downloaded = 0
 
 
         for index, js_url in enumerate(
@@ -285,7 +486,7 @@ if st.button(
 
                 js_response = requests.get(
                     js_url,
-                    headers=headers,
+                    headers=HEADERS,
                     timeout=20
                 )
 
@@ -295,24 +496,61 @@ if st.button(
                     continue
 
 
-                js = js_response.text
-
                 downloaded += 1
 
 
-                candidates = find_api_candidates(
+                js = js_response.text
+
+
+                strings = extract_strings(
                     js
                 )
 
 
-                for candidate in candidates:
+                for value in strings:
 
-                    all_candidates.add(
-                        (
-                            js_url,
-                            candidate
-                        )
+                    value = value.strip()
+
+
+                    if len(value) < 3:
+
+                        continue
+
+
+                    # Çok uzun JS parçalarını alma
+                    if len(value) > 500:
+
+                        continue
+
+
+                    score, reasons = score_endpoint(
+                        value
                     )
+
+
+                    if score <= 0:
+
+                        continue
+
+
+                    candidates[value][
+                        "score"
+                    ] = max(
+                        candidates[value]["score"],
+                        score
+                    )
+
+
+                    for reason in reasons:
+
+                        candidates[value][
+                            "reasons"
+                        ].add(reason)
+
+
+                    candidates[value][
+                        "sources"
+                    ].add(js_url)
 
 
             except Exception:
@@ -327,265 +565,38 @@ if st.button(
 
 
         # ----------------------------------------------------
-        # SONUÇ
+        # SIRALA
         # ----------------------------------------------------
 
-        st.divider()
+        ranked = []
 
-        st.subheader(
-            "🎯 Bulunan Olası Veri Endpointleri"
-        )
 
+        for value, info in candidates.items():
 
-        st.write(
-            f"Başarıyla indirilen JS: "
-            f"**{downloaded} / {len(script_urls)}**"
-        )
+            ranked.append({
 
+                "value":
+                    value,
 
-        # ----------------------------------------------------
-        # KATEGORİLER
-        # ----------------------------------------------------
+                "score":
+                    info["score"],
 
-        categories = {
+                "reasons":
+                    sorted(
+                        info["reasons"]
+                    ),
 
-            "STATISTICS": [],
-            "FIXTURE": [],
-            "LINEUP": [],
-            "PLAYER": [],
-            "EVENTS": [],
-            "SHOTS": [],
-            "XG": [],
-            "GRAPHQL": [],
-            "OTHER": []
-        }
-
-
-        for js_url, candidate in all_candidates:
-
-            low = candidate.lower()
-
-
-            if (
-                "statistics" in low
-                or "statistic" in low
-            ):
-
-                categories[
-                    "STATISTICS"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            elif "lineup" in low:
-
-                categories[
-                    "LINEUP"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            elif "player" in low:
-
-                categories[
-                    "PLAYER"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            elif (
-                "shots" in low
-            ):
-
-                categories[
-                    "SHOTS"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            elif (
-                "xg" in low
-                or "expected-goals" in low
-            ):
-
-                categories[
-                    "XG"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            elif (
-                "events" in low
-                or "/event" in low
-            ):
-
-                categories[
-                    "EVENTS"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            elif (
-                "fixture" in low
-                or "match" in low
-            ):
-
-                categories[
-                    "FIXTURE"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            elif "graphql" in low:
-
-                categories[
-                    "GRAPHQL"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            elif "/api/" in low:
-
-                categories[
-                    "OTHER"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-            else:
-
-                categories[
-                    "OTHER"
-                ].append(
-                    (js_url, candidate)
-                )
-
-
-        # ----------------------------------------------------
-        # ÖZET
-        # ----------------------------------------------------
-
-        cols = st.columns(4)
-
-        cols[0].metric(
-            "Toplam aday",
-            len(all_candidates)
-        )
-
-        cols[1].metric(
-            "Statistics",
-            len(categories["STATISTICS"])
-        )
-
-        cols[2].metric(
-            "Player",
-            len(categories["PLAYER"])
-        )
-
-        cols[3].metric(
-            "Fixture",
-            len(categories["FIXTURE"])
-        )
-
-
-        # ----------------------------------------------------
-        # ÖNEMLİ KATEGORİLERİ GÖSTER
-        # ----------------------------------------------------
-
-        important_categories = [
-
-            "STATISTICS",
-            "FIXTURE",
-            "LINEUP",
-            "PLAYER",
-            "EVENTS",
-            "SHOTS",
-            "XG",
-            "GRAPHQL"
-        ]
-
-
-        for category in important_categories:
-
-            items = categories[
-                category
-            ]
-
-            if not items:
-                continue
-
-
-            st.divider()
-
-            st.subheader(
-                f"⚽ {category}"
-            )
-
-
-            # Aynı endpointleri temizle
-            unique_items = sorted(
-                set(items),
-                key=lambda x: x[1]
-            )
-
-
-            for js_url, candidate in unique_items[:50]:
-
-                with st.expander(
-                    candidate[:180]
-                ):
-
-                    st.write(
-                        "Kaynak JavaScript:"
+                "sources":
+                    sorted(
+                        info["sources"]
                     )
-
-                    st.code(
-                        js_url,
-                        language="text"
-                    )
-
-                    st.write(
-                        "Bulunan ifade:"
-                    )
-
-                    st.code(
-                        candidate,
-                        language="text"
-                    )
+            })
 
 
-        # ----------------------------------------------------
-        # TÜM ADAYLAR
-        # ----------------------------------------------------
-
-        st.divider()
-
-        st.subheader(
-            "🧩 Tüm API Adayları"
+        ranked.sort(
+            key=lambda x: x["score"],
+            reverse=True
         )
-
-
-        with st.expander(
-            "Tüm sonuçları göster"
-        ):
-
-            for js_url, candidate in sorted(
-                all_candidates,
-                key=lambda x: x[1]
-            ):
-
-                st.write(
-                    candidate
-                )
 
 
         # ----------------------------------------------------
@@ -594,32 +605,190 @@ if st.button(
 
         st.divider()
 
-        if categories["STATISTICS"]:
+        st.subheader(
+            "🎯 EN GÜÇLÜ API / VERİ ADAYLARI"
+        )
 
-            st.success(
-                "🎯 Statistics ile ilgili endpoint "
-                "adayları bulundu!"
-            )
 
-        elif categories["FIXTURE"]:
+        col1, col2, col3 = st.columns(3)
 
-            st.warning(
-                "Fixture endpointleri bulundu fakat "
-                "statistics endpointi henüz doğrulanmadı."
+
+        col1.metric(
+            "JS dosyası",
+            len(script_urls)
+        )
+
+
+        col2.metric(
+            "İndirilen",
+            downloaded
+        )
+
+
+        col3.metric(
+            "Aday",
+            len(ranked)
+        )
+
+
+        # ----------------------------------------------------
+        # İLK 20
+        # ----------------------------------------------------
+
+        if not ranked:
+
+            st.error(
+                "API/veri adayı bulunamadı."
             )
 
         else:
 
+            for index, item in enumerate(
+                ranked[:20],
+                1
+            ):
+
+                score = item[
+                    "score"
+                ]
+
+                value = item[
+                    "value"
+                ]
+
+                reasons = item[
+                    "reasons"
+                ]
+
+
+                if score >= 70:
+
+                    level = "🔥 ÇOK GÜÇLÜ"
+
+                elif score >= 40:
+
+                    level = "🟠 GÜÇLÜ"
+
+                else:
+
+                    level = "🟡 ZAYIF"
+
+
+                with st.expander(
+                    f"{index}. {level} | "
+                    f"Skor {score} | "
+                    f"{value[:120]}"
+                ):
+
+                    st.write(
+                        "Bulunan adres/ifade:"
+                    )
+
+                    st.code(
+                        value,
+                        language="text"
+                    )
+
+
+                    st.write(
+                        "Neden puan aldı:"
+                    )
+
+                    st.write(
+                        ", ".join(
+                            reasons
+                        )
+                    )
+
+
+                    st.write(
+                        "Bulunduğu JS dosyaları:"
+                    )
+
+
+                    for source in item[
+                        "sources"
+                    ]:
+
+                        st.code(
+                            source,
+                            language="text"
+                        )
+
+
+        # ----------------------------------------------------
+        # ÖZEL İSTATİSTİK ADAYLARI
+        # ----------------------------------------------------
+
+        st.divider()
+
+        st.subheader(
+            "📊 İSTATİSTİK ODAKLI ADAYLAR"
+        )
+
+
+        stat_words = [
+            "statistics",
+            "statistic",
+            "shots",
+            "xg",
+            "possession",
+            "corner",
+            "lineup",
+            "events"
+        ]
+
+
+        stat_candidates = []
+
+
+        for item in ranked:
+
+            low = item[
+                "value"
+            ].lower()
+
+
+            if any(
+                word in low
+                for word in stat_words
+            ):
+
+                stat_candidates.append(
+                    item
+                )
+
+
+        if stat_candidates:
+
+            for item in stat_candidates[:30]:
+
+                st.code(
+                    item["value"],
+                    language="text"
+                )
+
+        else:
+
             st.warning(
-                "Açık bir istatistik endpointi bulunamadı."
+                "İstatistik adı içeren güçlü aday bulunamadı."
             )
 
 
-        st.info(
-            "📌 Sonraki aşamada bulduğumuz adayları "
-            "doğrudan HTTP ile test edip hangisinin "
-            "gerçek JSON maç verisi döndürdüğünü "
-            "belirleyeceğiz."
+        # ----------------------------------------------------
+        # BİLGİ
+        # ----------------------------------------------------
+
+        st.divider()
+
+        st.success(
+            "✅ JavaScript taraması tamamlandı."
+        )
+
+        st.caption(
+            "Bir sonraki aşamada en güçlü adaylardan "
+            "gerçek JSON döndüren endpoint otomatik "
+            "olarak test edilecek."
         )
 
 
