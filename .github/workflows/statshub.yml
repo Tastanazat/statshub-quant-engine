@@ -3,6 +3,9 @@ name: StatsHub Browser Scan
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   scrape:
 
@@ -40,7 +43,16 @@ jobs:
 
 
       # ==========================================
-      # 4. STATSHUB VERİ ÇEKME
+      # 4. DATABASE OLUŞTUR
+      # ==========================================
+
+      - name: Initialize Quant Engine database
+        run: |
+          python init_database.py
+
+
+      # ==========================================
+      # 5. STATSHUB VERİ ÇEKME
       # ==========================================
 
       - name: Run StatsHub scraper
@@ -49,7 +61,7 @@ jobs:
 
 
       # ==========================================
-      # 5. STATSHUB ANALİZ
+      # 6. STATSHUB ANALİZ
       # ==========================================
 
       - name: Run StatsHub analysis
@@ -58,7 +70,7 @@ jobs:
 
 
       # ==========================================
-      # 6. MATCH MODEL V2
+      # 7. MATCH MODEL V2
       # ==========================================
 
       - name: Build StatsHub match model
@@ -67,7 +79,7 @@ jobs:
 
 
       # ==========================================
-      # 7. MODEL DOSYASINI KONTROL ET
+      # 8. MODEL DOSYASINI KONTROL ET
       # ==========================================
 
       - name: Verify match model
@@ -80,7 +92,20 @@ jobs:
 
 
       # ==========================================
-      # 8. TÜM VERİLERİ ARTIFACT OLARAK YÜKLE
+      # 9. DATABASE KONTROL
+      # ==========================================
+
+      - name: Verify database
+        run: |
+          test -f data/database/quant_engine.db
+          echo "=========================================="
+          echo "QUANT ENGINE DATABASE BULUNDU"
+          echo "=========================================="
+          ls -lh data/database/quant_engine.db
+
+
+      # ==========================================
+      # 10. ARTIFACT
       # ==========================================
 
       - name: Upload StatsHub data
@@ -89,3 +114,31 @@ jobs:
           name: statshub-scan
           path: data/
           if-no-files-found: error
+
+
+      # ==========================================
+      # 11. DATABASE'İ REPOSITORY'YE KAYDET
+      # ==========================================
+
+      - name: Persist database
+        run: |
+
+          git config user.name "github-actions[bot]"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/database/quant_engine.db
+
+          if git diff --cached --quiet; then
+
+            echo "Database değişmedi."
+
+          else
+
+            git commit \
+              -m "Update Quant Engine database"
+
+            git push
+
+          fi
