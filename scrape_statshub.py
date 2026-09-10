@@ -1,376 +1,218 @@
-from playwright.sync_api import sync_playwright
 import requests
 import json
 import os
-from urllib.parse import urlparse
-
+import time
 
 # ============================================================
-# STATSHUB CONFIG
+# STATSHUB TEAM STATS API DISCOVERY
 # ============================================================
 
 BASE = "https://www.statshub.com"
-
-FIXTURE_URL = (
-    "https://www.statshub.com/fixture/"
-    "psv-eindhoven-vs-shakhtar-donetsk-mtv02l/416477"
-)
-
-EVENT_ID = 16938896
-FIXTURE_ID = 416477
 
 TEAMS = {
     "PSV": 2952,
     "Shakhtar": 3313,
 }
 
-TOURNAMENTS = "7,37,330,340,679,17015"
+TOURNAMENT_IDS = "7,37,330,340,679,17015"
 
 os.makedirs("data", exist_ok=True)
 
-
-# ============================================================
-# 1. PLAYER PERFORMANCE API
-# ============================================================
-
-player_results = {}
-
-headers = {
+HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/json,text/plain,*/*",
 }
 
+# ============================================================
+# STATSHUB'DA GÖRÜNEN TEAM STATISTICS ANAHTARLARI
+# ============================================================
+
+STAT_KEYS = [
+    "goals",
+    "corners",
+    "shots",
+    "cards",
+    "crosses",
+    "bigChanceCreated",
+    "bigChanceMissed",
+    "bigChanceScored",
+    "expectedGoals",
+    "shotsOnGoal",
+    "shotsOffGoal",
+    "totalShotsInsideBox",
+    "totalShotsOutsideBox",
+    "totalClearance",
+    "dispossessed",
+    "errorsLeadToGoal",
+    "errorsLeadToShot",
+    "fouls",
+    "goalkeeperSaves",
+    "interceptionWon",
+    "tackles",
+    "freeKicks",
+    "goalKicks",
+    "throwIns",
+    "possession",
+    "offsides",
+    "passes",
+    "touchesInOppBox",
+    "redCards",
+    "yellowCards",
+]
+
+# ============================================================
+# SONUÇLAR
+# ============================================================
+
+results = {}
+
+valid_keys = []
+
+print("")
+print("==========================================")
+print("STATSHUB TEAM STATS API TESTİ")
+print("==========================================")
+print("")
+
+# ============================================================
+# HER TAKIM + HER İSTATİSTİK
+# ============================================================
+
 for team_name, team_id in TEAMS.items():
 
-    url = (
-        f"{BASE}/api/team/{team_id}/players/performance"
-        f"?tournamentId={TOURNAMENTS}"
-        f"&limit=20"
-        f"&location=both"
-        f"&fixtureId={EVENT_ID}"
-    )
+    print("")
+    print("------------------------------------------")
+    print(team_name, "TEAM ID:", team_id)
+    print("------------------------------------------")
 
-    print(f"{team_name} verisi çekiliyor...")
+    results[team_name] = {}
 
-    try:
+    for stat_key in STAT_KEYS:
 
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=30
+        url = (
+            f"{BASE}/api/team/{team_id}/event-statistics"
+            f"?eventType=all"
+            f"&statisticKey={stat_key}"
+            f"&eventHalf=ALL"
+            f"&tournamentIds={TOURNAMENT_IDS}"
+            f"&limit=20"
         )
 
-        print(f"{team_name} HTTP:", response.status_code)
+        print(
+            f"{team_name} | {stat_key} ...",
+            end=" "
+        )
 
         try:
-            data = response.json()
-        except Exception:
-            data = {
-                "raw_text": response.text
-            }
 
-        player_results[team_name] = {
-            "team_id": team_id,
-            "url": url,
-            "status_code": response.status_code,
-            "data": data,
-        }
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=30
+            )
 
-    except Exception as e:
-
-        player_results[team_name] = {
-            "team_id": team_id,
-            "url": url,
-            "error": str(e),
-        }
-
-
-with open(
-    "data/statshub_players.json",
-    "w",
-    encoding="utf-8"
-) as f:
-
-    json.dump(
-        player_results,
-        f,
-        ensure_ascii=False,
-        indent=2
-    )
-
-
-print("Player Stats kaydedildi.")
-
-
-# ============================================================
-# 2. BROWSER NETWORK SCANNER
-# ============================================================
-
-network_results = []
-
-
-def handle_response(response):
-
-    try:
-
-        request = response.request
-
-        if request.resource_type not in ("xhr", "fetch"):
-            return
-
-        url = response.url
-
-        # Sadece StatsHub istekleri
-        if "statshub.com" not in url:
-            return
-
-        item = {
-            "url": url,
-            "status": response.status,
-            "method": request.method,
-            "resource_type": request.resource_type,
-            "content_type": response.headers.get(
-                "content-type",
-                ""
-            ),
-        }
-
-        # API cevaplarını mümkün olduğunca kaydet
-        if "/api/" in url:
+            status = response.status_code
 
             try:
-                body = response.text()
+                data = response.json()
+            except Exception:
+                data = {
+                    "raw_text": response.text[:10000]
+                }
 
-                item["body"] = body[:50000]
+            # ------------------------------------------------
+            # Veri kontrolü
+            # ------------------------------------------------
 
-            except Exception as e:
+            has_data = False
+            data_count = 0
 
-                item["body_error"] = str(e)
+            if isinstance(data, dict):
 
-        network_results.append(item)
+                raw_data = data.get("data")
 
-        print(
-            "NETWORK:",
-            response.status,
-            request.resource_type,
-            url
-        )
+                if isinstance(raw_data, list):
 
-    except Exception as e:
+                    data_count = len(raw_data)
 
-        print("Network kayıt hatası:", e)
+                    if data_count > 0:
+                        has_data = True
+
+                elif isinstance(raw_data, dict):
+
+                    has_data = len(raw_data) > 0
+
+                    data_count = len(raw_data)
+
+            elif isinstance(data, list):
+
+                data_count = len(data)
+
+                if data_count > 0:
+                    has_data = True
+
+            # ------------------------------------------------
+            # Sonucu kaydet
+            # ------------------------------------------------
+
+            results[team_name][stat_key] = {
+                "url": url,
+                "status_code": status,
+                "has_data": has_data,
+                "data_count": data_count,
+                "data": data,
+            }
+
+            if status == 200 and has_data:
+
+                print(
+                    "OK",
+                    f"({data_count} kayıt)"
+                )
+
+                if stat_key not in valid_keys:
+                    valid_keys.append(stat_key)
+
+            elif status == 200:
+
+                print(
+                    "200 - BOŞ"
+                )
+
+            else:
+
+                print(
+                    f"HTTP {status}"
+                )
+
+        except Exception as e:
+
+            print(
+                "HATA:",
+                str(e)
+            )
+
+            results[team_name][stat_key] = {
+                "url": url,
+                "error": str(e),
+            }
+
+        # StatsHub'ı gereksiz yere hızlı sorgulamamak için
+        time.sleep(0.15)
 
 
 # ============================================================
-# 3. PLAYWRIGHT
-# ============================================================
-
-print("")
-print("======================================")
-print("StatsHub browser taraması başlıyor...")
-print("======================================")
-print("")
-
-
-with sync_playwright() as p:
-
-    browser = p.chromium.launch(
-        headless=True
-    )
-
-    page = browser.new_page(
-        viewport={
-            "width": 1440,
-            "height": 1000
-        }
-    )
-
-    page.on(
-        "response",
-        handle_response
-    )
-
-    # --------------------------------------------------------
-    # Fixture aç
-    # --------------------------------------------------------
-
-    print("Fixture açılıyor...")
-
-    page.goto(
-        FIXTURE_URL,
-        wait_until="domcontentloaded",
-        timeout=60000
-    )
-
-    page.wait_for_timeout(7000)
-
-
-    # --------------------------------------------------------
-    # Player Stats
-    # --------------------------------------------------------
-
-    print("")
-    print("PLAYER STATS taranıyor...")
-
-    try:
-
-        tab = page.get_by_text(
-            "Player Stats",
-            exact=True
-        ).first
-
-        if tab.is_visible():
-
-            tab.click(
-                timeout=10000
-            )
-
-            page.wait_for_timeout(6000)
-
-            print("Player Stats açıldı.")
-
-    except Exception as e:
-
-        print(
-            "Player Stats tıklama:",
-            e
-        )
-
-
-    # --------------------------------------------------------
-    # Team Stats
-    # --------------------------------------------------------
-
-    print("")
-    print("TEAM STATS taranıyor...")
-
-    try:
-
-        tab = page.get_by_text(
-            "Team Stats",
-            exact=True
-        ).first
-
-        if tab.is_visible():
-
-            tab.click(
-                timeout=10000
-            )
-
-            page.wait_for_timeout(8000)
-
-            print("Team Stats açıldı.")
-
-    except Exception as e:
-
-        print(
-            "Team Stats tıklama:",
-            e
-        )
-
-
-    # --------------------------------------------------------
-    # Lineups
-    # --------------------------------------------------------
-
-    print("")
-    print("LINEUPS taranıyor...")
-
-    try:
-
-        tab = page.get_by_text(
-            "Lineups",
-            exact=True
-        ).first
-
-        if tab.is_visible():
-
-            tab.click(
-                timeout=10000
-            )
-
-            page.wait_for_timeout(6000)
-
-            print("Lineups açıldı.")
-
-    except Exception as e:
-
-        print(
-            "Lineups tıklama:",
-            e
-        )
-
-
-    # --------------------------------------------------------
-    # Team Stats tekrar
-    # --------------------------------------------------------
-
-    print("")
-    print("TEAM STATS ikinci tarama...")
-
-    try:
-
-        tab = page.get_by_text(
-            "Team Stats",
-            exact=True
-        ).first
-
-        if tab.is_visible():
-
-            tab.click(
-                timeout=10000
-            )
-
-            page.wait_for_timeout(5000)
-
-    except Exception:
-        pass
-
-
-    # --------------------------------------------------------
-    # Render edilmiş sayfayı kaydet
-    # --------------------------------------------------------
-
-    html = page.content()
-
-    text = page.locator(
-        "body"
-    ).inner_text()
-
-
-    with open(
-        "data/statshub_rendered.html",
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        f.write(html)
-
-
-    with open(
-        "data/statshub_text.txt",
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        f.write(text)
-
-
-    browser.close()
-
-
-# ============================================================
-# 4. NETWORK SONUÇLARINI KAYDET
+# TÜM SONUÇLARI KAYDET
 # ============================================================
 
 with open(
-    "data/statshub_network.json",
+    "data/statshub_team_statistics_probe.json",
     "w",
     encoding="utf-8"
 ) as f:
 
     json.dump(
-        network_results,
+        results,
         f,
         ensure_ascii=False,
         indent=2
@@ -378,70 +220,86 @@ with open(
 
 
 # ============================================================
-# 5. API ADRESLERİNİ AYIKLA
+# GEÇERLİ ANAHTARLAR
 # ============================================================
 
-api_urls = []
-
-for item in network_results:
-
-    url = item.get("url", "")
-
-    if "/api/" in url:
-
-        if url not in api_urls:
-
-            api_urls.append(url)
-
-
 with open(
-    "data/statshub_api_urls.txt",
+    "data/statshub_valid_team_stats.txt",
     "w",
     encoding="utf-8"
 ) as f:
 
-    for url in api_urls:
+    for key in valid_keys:
 
-        f.write(url)
+        f.write(key)
         f.write("\n")
 
 
 # ============================================================
-# 6. ÖZET
+# ÖZET JSON
+# ============================================================
+
+summary = {
+    "source": "StatsHub",
+    "teams": TEAMS,
+    "tournament_ids": TOURNAMENT_IDS,
+    "tested_keys": STAT_KEYS,
+    "valid_keys": valid_keys,
+    "valid_key_count": len(valid_keys),
+}
+
+with open(
+    "data/statshub_team_stats_summary.json",
+    "w",
+    encoding="utf-8"
+) as f:
+
+    json.dump(
+        summary,
+        f,
+        ensure_ascii=False,
+        indent=2
+    )
+
+
+# ============================================================
+# EKRAN ÖZETİ
 # ============================================================
 
 print("")
-print("======================================")
+print("")
+print("==========================================")
 print("TARAMA TAMAMLANDI")
-print("======================================")
+print("==========================================")
+print("")
 
 print(
-    "Toplam network kaydı:",
-    len(network_results)
+    "Test edilen istatistik:",
+    len(STAT_KEYS)
 )
 
 print(
-    "API adresi:",
-    len(api_urls)
+    "Gerçek veri döndüren:",
+    len(valid_keys)
 )
 
 print("")
-print("Bulunan API adresleri:")
+print("GEÇERLİ STATSHUB TEAM STATS KEY'LERİ:")
 print("")
 
-for i, url in enumerate(
-    api_urls,
+for i, key in enumerate(
+    valid_keys,
     start=1
 ):
 
     print(
-        f"{i}. {url}"
+        f"{i}. {key}"
     )
 
 print("")
-print("Dosyalar:")
-print("data/statshub_players.json")
-print("data/statshub_network.json")
-print("data/statshub_api_urls.txt")
-print("data/statshub_rendered.html")
-print("data/statshub_text.txt")
+print("Dosyalar oluşturuldu:")
+print("")
+print("1. statshub_team_statistics_probe.json")
+print("2. statshub_valid_team_stats.txt")
+print("3. statshub_team_stats_summary.json")
+print("")
