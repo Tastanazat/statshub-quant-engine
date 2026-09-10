@@ -85,27 +85,76 @@ jobs:
       - name: Verify match model
         run: |
           test -f data/statshub_match_model.json
+
           echo "=========================================="
           echo "MATCH MODEL DOSYASI BULUNDU"
           echo "=========================================="
+
           ls -lh data/statshub_match_model.json
 
 
       # ==========================================
-      # 9. DATABASE KONTROL
+      # 9. TAHMİNİ DATABASE'E KAYDET
+      # ==========================================
+
+      - name: Record model prediction
+        run: |
+          python record_prediction.py
+
+
+      # ==========================================
+      # 10. DATABASE KONTROL
       # ==========================================
 
       - name: Verify database
         run: |
           test -f data/database/quant_engine.db
+
           echo "=========================================="
           echo "QUANT ENGINE DATABASE BULUNDU"
           echo "=========================================="
+
           ls -lh data/database/quant_engine.db
 
 
       # ==========================================
-      # 10. ARTIFACT
+      # 11. ARTIFACT
+      # ==========================================
+
+      - name: Upload StatsHub data
+        uses: actions/upload-artifact@v4
+        with:
+          name: statshub-scan
+          path: data/
+          if-no-files-found: error
+
+
+      # ==========================================
+      # 12. DATABASE'İ REPOSITORY'YE KAYDET
+      # ==========================================
+
+      - name: Persist database
+        run: |
+
+          git config user.name "github-actions[bot]"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/database/quant_engine.db
+
+          if git diff --cached --quiet; then
+
+            echo "Database değişmedi."
+
+          else
+
+            git commit \
+              -m "Update Quant Engine database"
+
+            git push
+
+          fi      # 10. ARTIFACT
       # ==========================================
 
       - name: Upload StatsHub data
