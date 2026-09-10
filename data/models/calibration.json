@@ -1,0 +1,12 @@
+{
+  "source": "StatsHub",
+  "calibration_engine_version": "SH-CALIBRATION-002",
+  "method": "EMPIRICAL_BUCKET_SHRINKAGE",
+  "minimum_sample_requirement": 30,
+  "bucket_width": 0.1,
+  "shrinkage_strength": 30.0,
+  "generated_at": "2026-09-10T18:56:44.615874+00:00",
+  "status": "WAITING_FOR_SETTLEMENT",
+  "settled_predictions": 0,
+  "models": {}
+}

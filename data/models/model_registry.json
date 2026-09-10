@@ -1,0 +1,27 @@
+{
+  "source": "StatsHub",
+  "registry_version": "SH-REGISTRY-001",
+  "generated_at": "2026-09-10T18:56:44.652764+00:00",
+  "active_model": "SH-POISSON-002",
+  "models": {
+    "SH-POISSON-002": {
+      "model_version": "SH-POISSON-002",
+      "source": "StatsHub",
+      "home": "PSV",
+      "away": "Shakhtar",
+      "lambda_home": 2.22775,
+      "lambda_away": 1.371,
+      "status": "ACTIVE",
+      "eligible_for_activation": false,
+      "registered_at": "2026-09-10T18:56:44.652734+00:00",
+      "last_validated_at": "2026-09-10T18:56:44.652737+00:00"
+    }
+  },
+  "history": [
+    {
+      "timestamp": "2026-09-10T18:56:44.652741+00:00",
+      "model_version": "SH-POISSON-002",
+      "action": "INITIALIZED"
+    }
+  ]
+}
